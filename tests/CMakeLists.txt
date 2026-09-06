@@ -10,3 +10,7 @@ add_subdirectory(rendering)
 if(CATALYST_BUILD_UI)
 	add_subdirectory(ui)
 endif()
+
+if(CATALYST_BUILD_RESOURCE)
+	add_subdirectory(resource)
+endif()

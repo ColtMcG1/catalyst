@@ -38,7 +38,7 @@ To get started with Catalyst, follow these steps:
 4. Run the example application:
 
     ```bash
-    ./build/examples/sandbox/Release/catalyst_sandbox.exe
+    ./build/examples/audio_playback/Release/catalyst_audio_playback.exe
     ```
 
 ### Multi-compiler builds (Windows)

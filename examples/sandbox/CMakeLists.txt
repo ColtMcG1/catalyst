@@ -1,5 +1,5 @@
-# CMakeLists.txt for the Catalyst sandbox example application.
-# This example demonstrates how to set up a simple application that links against the Catalyst libraries. It includes the main source file and links against either the monolithic catalyst library or the individual modules, depending on how the project is configured. The example also ensures that the include directories are set up correctly to access the Catalyst headers.
+# CMakeLists.txt for the Catalyst sandbox application.
+# The sandbox is an empty scratch target for experimenting with the Catalyst libraries: its main function does nothing, and it links against either the monolithic catalyst library or the individual modules, depending on how the project is configured. The focused examples alongside it demonstrate the individual modules.
 # License: CDDL-1.0 (see LICENSE).
 
 add_executable(catalyst_sandbox
