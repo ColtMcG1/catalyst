@@ -1,87 +1,88 @@
 #include <benchmark.hpp>
 
-#include <catalyst/core/dispatcher.hpp>
-#include <catalyst/core/event.hpp>
-#include <catalyst/core/event_queue.hpp>
-
 #include <atomic>
+#include <barrier>
 #include <chrono>
+#include <concepts>
 #include <cstddef>
+#include <functional>
 #include <iomanip>
 #include <iostream>
+#include <memory>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include <catalyst/events/bus.hpp>
+
 namespace
 {
-    struct benchmark_event final : catalyst::core::event<benchmark_event>
+    struct benchmark_event final
     {
-        explicit benchmark_event(std::size_t event_value) noexcept : value(event_value) {}
-
         std::size_t value;
     };
 
-    // Distinct event types that have subscribers but are never published: a large system has hundreds of these.
     template <int N>
-    struct idle_event final : catalyst::core::event<idle_event<N>>
+    struct idle_event final
     {
     };
 
     std::atomic_size_t handled_events{0u};
 
-    void handle_event(const benchmark_event& event)
+    void handle_event(const benchmark_event &event)
     {
         handled_events.fetch_add(event.value, std::memory_order_relaxed);
     }
 
-    /**
-     * @brief A handler for the concurrent cases that accumulates into thread-local storage.
-     * @details handle_event's single shared atomic is a cache line every publishing core has to take exclusively, and with
-     * eight threads that one line, not the dispatcher, is what the benchmark would measure. This variant leaves the
-     * dispatcher as the only thing shared.
-     */
-    void handle_event_thread_local(const benchmark_event& event)
+    void handle_event_thread_local(const benchmark_event &event)
     {
         static thread_local std::size_t local_total = 0u;
         local_total += event.value;
         if (local_total == ~std::size_t{0})
-            handled_events.fetch_add(1u, std::memory_order_relaxed); // never taken; keeps the accumulation alive
+            handled_events.fetch_add(1u, std::memory_order_relaxed);
+    }
+
+    catalyst::events::task<void> handle_event_async(const benchmark_event &event)
+    {
+        handle_event(event);
+        co_return;
     }
 
     template <int... Is>
-    void subscribe_idle(catalyst::core::dispatcher& dispatcher,
-                        std::vector<catalyst::core::subscription>& subscriptions,
-                        int handlers_per_type,
-                        std::integer_sequence<int, Is...>)
+    void add_idle_listeners(catalyst::events::bus &bus,
+                            std::vector<catalyst::events::bus::token> &tokens,
+                            int listeners_per_type,
+                            std::integer_sequence<int, Is...>)
     {
         ((void)[&]
         {
-            for (int k = 0; k < handlers_per_type; ++k)
-                subscriptions.push_back(dispatcher.subscribe<idle_event<Is>>([](const idle_event<Is>&) {}));
+            for (int listener = 0; listener < listeners_per_type; ++listener)
+                tokens.push_back(bus.add_listener<idle_event<Is>>([](const idle_event<Is> &) {}));
         }(), ...);
     }
-    /**
-     * @brief Times a block that is run on @p threads threads at once and reports the aggregate rate.
-     * @details catalyst::bench::run measures one operation at a time on the calling thread, which cannot express "how
-     * many publishes per second does the whole machine manage", so the concurrent cases report themselves. The average is
-     * wall time divided by the total operations across all threads, so it is directly comparable with the single-threaded
-     * numbers above: equal means one thread's worth of throughput, lower means the design scales.
-     */
+
     template <typename Body>
-    void run_parallel(std::string_view name, unsigned threads, std::size_t per_thread, Body&& body)
+    void run_parallel(std::string_view name, unsigned threads, std::size_t per_thread, Body &&body)
     {
         using clock = std::chrono::steady_clock;
 
-        const auto start = clock::now();
-
+        std::barrier start_gate{static_cast<std::ptrdiff_t>(threads + 1u)};
         std::vector<std::thread> workers;
         workers.reserve(threads);
-        for (unsigned t = 0u; t < threads; ++t)
-            workers.emplace_back([&] { body(per_thread); });
-        for (auto& worker : workers)
+        for (unsigned thread = 0u; thread < threads; ++thread)
+            workers.emplace_back([&]
+            {
+                start_gate.arrive_and_wait();
+                body(per_thread);
+            });
+
+        const auto start = clock::now();
+        start_gate.arrive_and_wait();
+        for (auto &worker : workers)
             worker.join();
 
         const auto elapsed = clock::now() - start;
@@ -107,187 +108,149 @@ int main()
     });
 
     {
-        catalyst::core::dispatcher dispatcher;
-        const auto subscription = dispatcher.subscribe<benchmark_event>(handle_event);
-
-        catalyst::bench::run("dispatcher.publish (one subscriber, construct per call)", iterations, [&]
+        catalyst::events::bus bus;
+        catalyst::bench::run("bus.dispatch (no listeners or middleware)", iterations, [&]
         {
-            dispatcher.publish(benchmark_event{1u});
-        });
-
-        const benchmark_event prebuilt{1u};
-        catalyst::bench::run("dispatcher.publish (one subscriber, prebuilt event)", iterations, [&]
-        {
-            dispatcher.publish(prebuilt);
-        });
-
-        catalyst::bench::run("dispatcher.publish (no subscribers for this type)", iterations, [&]
-        {
-            dispatcher.publish(idle_event<0>{});
+            bus.dispatch(benchmark_event{1u});
         });
     }
 
     {
-        // Publish cost must not depend on how many *other* types have subscribers.
-        catalyst::core::dispatcher dispatcher;
-        const auto subscription = dispatcher.subscribe<benchmark_event>(handle_event);
-        std::vector<catalyst::core::subscription> idle;
-        subscribe_idle(dispatcher, idle, 8, std::make_integer_sequence<int, 256>{});
-        const benchmark_event prebuilt{1u};
+        catalyst::events::bus bus;
+        const auto listener = bus.add_listener<benchmark_event>(handle_event);
 
-        catalyst::bench::run("dispatcher.publish (one subscriber + 256 idle types x 8 handlers)", iterations, [&]
+        catalyst::bench::run("bus.dispatch (one synchronous listener)", iterations, [&]
         {
-            dispatcher.publish(prebuilt);
-        });
-
-        catalyst::bench::run("dispatcher.subscribe + unsubscribe (with 256 idle types present)", iterations, [&]
-        {
-            const auto transient = dispatcher.subscribe<benchmark_event>([](const benchmark_event&) {});
+            bus.dispatch(benchmark_event{1u});
         });
     }
 
     {
-        // Fan-out: one event, many subscribers of the same type.
-        catalyst::core::dispatcher dispatcher;
-        std::vector<catalyst::core::subscription> fan;
-        for (int i = 0; i < 64; ++i)
-            fan.push_back(dispatcher.subscribe<benchmark_event>(handle_event));
-        const benchmark_event prebuilt{1u};
+        catalyst::events::bus bus;
+        const auto listener = bus.add_listener<benchmark_event>(handle_event);
+        std::vector<catalyst::events::bus::token> idle;
+        add_idle_listeners(bus, idle, 8, std::make_integer_sequence<int, 256>{});
 
-        catalyst::bench::run("dispatcher.publish (64 subscribers of the same type)", iterations / 10u, [&]
+        catalyst::bench::run("bus.dispatch (one listener + 256 idle types x 8 listeners)", iterations, [&]
         {
-            dispatcher.publish(prebuilt);
+            bus.dispatch(benchmark_event{1u});
         });
 
-        // Consumption: a high-priority handler swallows the event before the 64 others run.
-        const auto consumer = dispatcher.subscribe<benchmark_event>([](const benchmark_event&) { return true; }, 100);
-        catalyst::bench::run("dispatcher.publish (consumed by first of 65 handlers)", iterations, [&]
+        catalyst::bench::run("bus.add_listener + token.remove (with idle types present)", iterations, [&]
         {
-            dispatcher.publish(prebuilt);
+            auto transient = bus.add_listener<benchmark_event>([](const benchmark_event &) {});
+            transient.remove();
         });
     }
 
     {
-        // Robustness: after a handler throws, cleanup must keep working.
-        catalyst::core::dispatcher dispatcher;
-        const auto subscription = dispatcher.subscribe<benchmark_event>(handle_event);
-        const benchmark_event prebuilt{1u};
+        catalyst::events::bus bus;
+        std::vector<catalyst::events::bus::token> listeners;
+        for (int listener = 0; listener < 64; ++listener)
+            listeners.push_back(bus.add_listener<benchmark_event>(handle_event));
 
+        catalyst::bench::run("bus.dispatch (64 synchronous listeners)", iterations / 10u, [&]
         {
-            const auto thrower = dispatcher.subscribe<benchmark_event>([](const benchmark_event&) { throw 1; });
-            try { dispatcher.publish(prebuilt); } catch (...) {}
+            bus.dispatch(benchmark_event{1u});
+        });
+    }
+
+    {
+        catalyst::events::bus bus;
+        const auto listener = bus.add_listener<benchmark_event>(handle_event);
+        const auto middleware = bus.add_middleware<benchmark_event>([](benchmark_event &event, const auto &next)
+        {
+            next(event);
+        });
+
+        catalyst::bench::run("bus.dispatch (one chain middleware + one listener)", iterations, [&]
+        {
+            bus.dispatch(benchmark_event{1u});
+        });
+    }
+
+    {
+        catalyst::events::bus bus;
+        const auto listener = bus.add_listener<benchmark_event>(handle_event);
+        const auto middleware = bus.add_middleware<benchmark_event>([](benchmark_event &) { return false; });
+
+        catalyst::bench::run("bus.dispatch (middleware stops before one listener)", iterations, [&]
+        {
+            bus.dispatch(benchmark_event{1u});
+        });
+    }
+
+    {
+        catalyst::events::bus bus;
+        const auto listener = bus.add_listener<benchmark_event>(handle_event_async);
+
+        catalyst::bench::run("bus.dispatch_async (one asynchronous listener)", iterations / 10u, [&]
+        {
+            bus.dispatch_async(benchmark_event{1u}).get();
+        });
+    }
+
+    {
+        catalyst::events::bus bus;
+        const auto listener = bus.add_listener<benchmark_event>(handle_event_async);
+        const auto middleware = bus.add_async_middleware<benchmark_event>([](benchmark_event &event, const auto &next) -> catalyst::events::task<void>
+        {
+            co_await next(event);
+        });
+
+        catalyst::bench::run("bus.dispatch_async (one chain middleware + one listener)", iterations / 10u, [&]
+        {
+            bus.dispatch_async(benchmark_event{1u}).get();
+        });
+    }
+
+    {
+        catalyst::events::bus bus;
+        const auto listener = bus.add_listener<benchmark_event>(handle_event_thread_local);
+
+        catalyst::bench::run("bus.dispatch (1 thread, thread-local listener)", iterations, [&]
+        {
+            bus.dispatch(benchmark_event{1u});
+        });
+
+        for (const unsigned threads : {2u, 4u, 8u})
+        {
+            run_parallel("bus.dispatch (" + std::to_string(threads) + " threads, one listener)",
+                         threads,
+                         iterations / threads,
+                         [&](std::size_t count)
+                         {
+                             for (std::size_t iteration = 0u; iteration < count; ++iteration)
+                                 bus.dispatch(benchmark_event{1u});
+                         });
         }
-        for (int i = 0; i < 20'000; ++i)
-        {
-            const auto transient = dispatcher.subscribe<benchmark_event>([](const benchmark_event&) {});
-        }
-
-        catalyst::bench::run("dispatcher.publish (after handler exception + 20k churn)", iterations, [&]
-        {
-            dispatcher.publish(prebuilt);
-        });
     }
 
     {
-        catalyst::core::dispatcher dispatcher;
-        const auto subscription = dispatcher.subscribe<benchmark_event>(handle_event);
-        catalyst::core::event_queue queue;
-
-        catalyst::bench::run("event_queue.push + dispatch_to (one event per batch)", iterations, [&]
-        {
-            queue.push<benchmark_event>(1u);
-            queue.dispatch_to(dispatcher);
-        });
-
-        // A drain that takes the whole batch in one go is what a frame loop actually does, and it is where the queue's
-        // per-event cost should be: one lock acquisition for the batch instead of one per event.
-        catalyst::bench::run("event_queue.push + dispatch_to (256-event batches)", iterations / 256u, [&]
-        {
-            for (std::size_t i = 0u; i < 256u; ++i)
-                queue.push<benchmark_event>(1u);
-            queue.dispatch_to(dispatcher);
-        });
-
-        // Coalescing turns a burst of same-slot events into one queued event and one delivery.
-        catalyst::bench::run("event_queue.push_coalescing (256 same-slot events per batch)", iterations / 256u, [&]
-        {
-            for (std::size_t i = 0u; i < 256u; ++i)
-                queue.push_coalescing<benchmark_event>(1u, 1u);
-            queue.dispatch_to(dispatcher);
-        });
-    }
-
-    {
-        // The single-threaded reference point for the concurrent rows below: same handler, one thread.
-        catalyst::core::dispatcher dispatcher;
-        const auto subscription = dispatcher.subscribe<benchmark_event>(handle_event_thread_local);
-        const benchmark_event prebuilt{1u};
-
-        catalyst::bench::run("dispatcher.publish (1 thread, thread-local handler)", iterations, [&]
-        {
-            dispatcher.publish(prebuilt);
-        });
-    }
-
-    // Contention: what the copy-on-write handler tables buy. Publishing the same event type from every core has to scale,
-    // because publishes share a reader lock for a hash lookup and then run the handlers with no lock held at all.
-    for (const unsigned threads : {2u, 4u, 8u})
-    {
-        catalyst::core::dispatcher dispatcher;
-        const auto subscription = dispatcher.subscribe<benchmark_event>(handle_event_thread_local);
-        const benchmark_event prebuilt{1u};
-
-        run_parallel("dispatcher.publish (" + std::to_string(threads) + " threads, one subscriber)",
-                     threads,
-                     iterations / threads,
-                     [&](std::size_t n) { for (std::size_t i = 0u; i < n; ++i) dispatcher.publish(prebuilt); });
-    }
-
-    // The same thing with a subscription churning on one of the threads: a writer taking the exclusive lock to swap in a
-    // new handler table must not stall the publishers for longer than the swap itself.
-    {
-        catalyst::core::dispatcher dispatcher;
-        const auto subscription = dispatcher.subscribe<benchmark_event>(handle_event_thread_local);
-        const benchmark_event prebuilt{1u};
+        catalyst::events::bus bus;
+        const auto listener = bus.add_listener<benchmark_event>(handle_event_thread_local);
         std::atomic<bool> churning{true};
 
         std::thread churn([&]
         {
             while (churning.load(std::memory_order_acquire))
             {
-                const auto transient = dispatcher.subscribe<benchmark_event>([](const benchmark_event&) {});
+                auto transient = bus.add_listener<benchmark_event>([](const benchmark_event &) {});
+                transient.remove();
             }
         });
 
-        run_parallel("dispatcher.publish (4 threads + a subscribe/unsubscribe churn thread)",
+        run_parallel("bus.dispatch (4 threads + add/remove churn thread)",
                      4u,
                      iterations / 4u,
-                     [&](std::size_t n) { for (std::size_t i = 0u; i < n; ++i) dispatcher.publish(prebuilt); });
+                     [&](std::size_t count)
+                     {
+                         for (std::size_t iteration = 0u; iteration < count; ++iteration)
+                             bus.dispatch(benchmark_event{1u});
+                     });
 
         churning.store(false, std::memory_order_release);
         churn.join();
-    }
-
-    // Many producers feeding one draining consumer, which is the shape of every worker-thread-to-frame-loop handoff.
-    {
-        catalyst::core::dispatcher dispatcher;
-        const auto subscription = dispatcher.subscribe<benchmark_event>(handle_event);
-        catalyst::core::event_queue queue;
-
-        std::atomic<bool> producing{true};
-        std::thread consumer([&]
-        {
-            while (producing.load(std::memory_order_acquire) || !queue.empty())
-                queue.dispatch_to(dispatcher);
-        });
-
-        run_parallel("event_queue.push (4 producer threads, 1 draining consumer)",
-                     4u,
-                     iterations / 4u,
-                     [&](std::size_t n) { for (std::size_t i = 0u; i < n; ++i) queue.push<benchmark_event>(1u); });
-
-        producing.store(false, std::memory_order_release);
-        consumer.join();
     }
 
     return handled_events.load(std::memory_order_relaxed) == 0u;

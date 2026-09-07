@@ -1,16 +1,10 @@
 /**
  * @file core.hpp
- * @brief Main header for the catalyst::core module, which includes core types and functions related to event handling and dispatching. This header includes the dispatcher.hpp, event_sink.hpp, event_queue.hpp, event.hpp, and subscription.hpp files, which define the main components of the event system in the Catalyst framework. The catalyst::core namespace provides a structured way to access these core functionalities.
+ * @brief Main header for the catalyst::core module.
  * License: CDDL-1.0 (see LICENSE).
  */
 
 #pragma once
-
-#include <catalyst/core/dispatcher.hpp>
-#include <catalyst/core/event_sink.hpp>
-#include <catalyst/core/event_queue.hpp>
-#include <catalyst/core/event.hpp>
-#include <catalyst/core/subscription.hpp>
 
 namespace catalyst::core
 {
