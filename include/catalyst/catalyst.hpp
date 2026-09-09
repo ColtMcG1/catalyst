@@ -4,6 +4,7 @@
 #include <catalyst/audio/audio.hpp>
 #include <catalyst/core/core.hpp>
 #include <catalyst/input/input.hpp>
+#include <catalyst/logging/logging.hpp>
 #include <catalyst/math/math.hpp>
 #include <catalyst/net/net.hpp>
 #include <catalyst/physics/physics.hpp>

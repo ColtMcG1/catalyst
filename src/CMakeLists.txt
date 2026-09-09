@@ -22,6 +22,10 @@ if(CATALYST_BUILD_INPUT)
   add_subdirectory(input)
 endif()
 
+if(CATALYST_BUILD_LOGGING)
+  add_subdirectory(logging)
+endif()
+
 if(CATALYST_BUILD_MATH)
   add_subdirectory(math)
 endif()
@@ -104,6 +108,10 @@ if(CATALYST_BUILD_ALL)
 
   if(TARGET catalyst_input)
     target_link_libraries(catalyst PUBLIC catalyst_input)
+  endif()
+
+  if(TARGET catalyst_logging)
+    target_link_libraries(catalyst PUBLIC catalyst_logging)
   endif()
 
   if(TARGET catalyst_math)
