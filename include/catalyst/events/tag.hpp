@@ -81,7 +81,9 @@ namespace catalyst::events
      * @variable invalid_event_key
      * @brief A constant representing an invalid event key.
      */
-    constexpr event_key invalid_event_key = event_key{std::in_place_index<0>, static_cast<event_type_t>(-1)};
+    constexpr event_key invalid_event_key = event_key{
+        std::in_place_index<0>,
+        static_cast<event_type_t>(-1)};
 
     /**
      * @brief Retrieves the event key for a given event type.
@@ -91,10 +93,14 @@ namespace catalyst::events
     template <typename Event>
     constexpr event_key event_id()
     {
-        if constexpr (has_static_tag_v<Event>)  // If the event has a static tag, use it as the event key.
-            return event_key{std::in_place_index<0>, static_event_tag<Event>::value};
-        else    // If the event does not have a static tag, use its type index as the event key.
-            return event_key{std::in_place_index<1>, typeid(Event)};
+        if constexpr (has_static_tag_v<Event>) // If the event has a static tag, use it as the event key.
+            return event_key{
+                std::in_place_index<0>,
+                static_event_tag<Event>::value};
+        else // If the event does not have a static tag, use its type index as the event key.
+            return event_key{
+                std::in_place_index<1>,
+                typeid(Event)};
     }
 
 } // namespace catalyst::events

@@ -54,7 +54,7 @@ namespace
 
     template <int... Is>
     void add_idle_listeners(catalyst::events::bus &bus,
-                            std::vector<catalyst::events::bus::token> &tokens,
+                            std::vector<catalyst::events::token> &tokens,
                             int listeners_per_type,
                             std::integer_sequence<int, Is...>)
     {
@@ -128,7 +128,7 @@ int main()
     {
         catalyst::events::bus bus;
         const auto listener = bus.add_listener<benchmark_event>(handle_event);
-        std::vector<catalyst::events::bus::token> idle;
+        std::vector<catalyst::events::token> idle;
         add_idle_listeners(bus, idle, 8, std::make_integer_sequence<int, 256>{});
 
         catalyst::bench::run("bus.dispatch (one listener + 256 idle types x 8 listeners)", iterations, [&]
@@ -145,7 +145,7 @@ int main()
 
     {
         catalyst::events::bus bus;
-        std::vector<catalyst::events::bus::token> listeners;
+        std::vector<catalyst::events::token> listeners;
         for (int listener = 0; listener < 64; ++listener)
             listeners.push_back(bus.add_listener<benchmark_event>(handle_event));
 
