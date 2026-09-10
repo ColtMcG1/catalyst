@@ -3,12 +3,12 @@
  * @brief WASAPI output and capture backend for Windows. Enumerates endpoints by their stable
  * endpoint identifier, negotiates a format and reports what was actually agreed, runs its render
  * thread under MMCSS "Pro Audio" scheduling, detects device invalidation instead of silently
- * going quiet, and forwards endpoint topology changes to the application.
+ * going quiet, and queues endpoint topology changes for `stream::pump()` to publish.
  *
  * Duplex is not implemented here: WASAPI render and capture are independent clients with
  * independent clocks, so a correct implementation needs an asynchronous ring buffer and drift
  * compensation. Rather than ship a version that glitches, this backend reports
- * `audio_error::unsupported_operation` for `stream_direction::duplex`.
+ * `error_code::unsupported_operation` for `stream_direction::duplex`.
  * License: CDDL-1.0 (see LICENSE).
  */
 
@@ -33,6 +33,8 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <optional>
+#include <span>
 #include <thread>
 #include <vector>
 
@@ -65,20 +67,26 @@ namespace catalyst::audio::detail
         struct notify_state
         {
             std::atomic<bool> active{true};
-            device_change_callback callback = nullptr;
-            void *user = nullptr;
+            notice_queue *notices = nullptr;
             std::atomic<uint64_t> changes{0};
             std::wstring watched_device_id;
+            stream_direction direction = stream_direction::output;
 
-            void fire(device_change change, std::wstring_view device_id) noexcept
+            void fire(device_notice::kind what, std::wstring_view device_id) noexcept
             {
                 changes.fetch_add(1, std::memory_order_relaxed);
 
-                if (!active.load(std::memory_order_acquire) || !callback)
+                if (!active.load(std::memory_order_acquire) || !notices)
                     return;
 
-                const std::string id = wide_to_utf8(device_id);
-                callback(change, id, user);
+                // Queued rather than delivered: this is a COM notification thread, and nothing the
+                // application wrote should be made to run on it. `stream::pump()` publishes.
+                device_notice notice;
+                notice.what = what;
+                notice.device_id = wide_to_utf8(device_id);
+                notice.direction = direction;
+                notice.time = audio_clock::now();
+                notices->push(std::move(notice));
             }
         };
 
@@ -122,21 +130,21 @@ namespace catalyst::audio::detail
             {
                 (void)flow;
                 if (role == eConsole && state_)
-                    state_->fire(device_change::default_device_changed, device_id ? device_id : L"");
+                    state_->fire(device_notice::kind::default_changed, device_id ? device_id : L"");
                 return S_OK;
             }
 
             HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR device_id) override
             {
                 if (state_)
-                    state_->fire(device_change::device_added, device_id ? device_id : L"");
+                    state_->fire(device_notice::kind::added, device_id ? device_id : L"");
                 return S_OK;
             }
 
             HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR device_id) override
             {
                 if (state_)
-                    state_->fire(device_change::device_removed, device_id ? device_id : L"");
+                    state_->fire(device_notice::kind::removed, device_id ? device_id : L"");
                 return S_OK;
             }
 
@@ -152,12 +160,12 @@ namespace catalyst::audio::detail
                 if (new_state != DEVICE_STATE_ACTIVE)
                 {
                     state_->fire(
-                        is_active_stream ? device_change::device_lost : device_change::device_removed,
+                        is_active_stream ? device_notice::kind::lost : device_notice::kind::removed,
                         id);
                 }
                 else
                 {
-                    state_->fire(device_change::device_added, id);
+                    state_->fire(device_notice::kind::added, id);
                 }
 
                 return S_OK;
@@ -302,25 +310,24 @@ namespace catalyst::audio::detail
         class wasapi_backend_win32 final : public backend
         {
         public:
-            explicit wasapi_backend_win32(engine_config config)
-                : config_(std::move(config)), dispatcher_(config_.callback, config_.user, stats_) {}
+            explicit wasapi_backend_win32(open_request request)
+                : request_(std::move(request)), dispatcher_(request_.render, stats_) {}
 
-            ~wasapi_backend_win32() override { shutdown(); }
+            ~wasapi_backend_win32() override { close(); }
 
-            std::string_view name() const noexcept override { return "WASAPI"; }
-            engine_backend kind() const noexcept override { return engine_backend::wasapi; }
+            [[nodiscard]] backend_kind kind() const noexcept override { return backend_kind::wasapi; }
 
-            std::expected<std::vector<device_info>, audio_error> enumerate_devices() const override
+            [[nodiscard]] std::expected<std::vector<device_info>, error> enumerate_devices() const override
             {
                 com_scope com;
                 if (!com.ok())
-                    return std::unexpected(audio_error::platform_error);
+                    return failure(error_code::platform_error);
 
                 ComPtr<IMMDeviceEnumerator> enumerator;
                 if (FAILED(CoCreateInstance(
                         __uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator))))
                 {
-                    return std::unexpected(audio_error::platform_error);
+                    return failure(error_code::platform_error);
                 }
 
                 const EDataFlow flow = enumeration_flow();
@@ -329,12 +336,12 @@ namespace catalyst::audio::detail
                 if (FAILED(enumerator->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection)) ||
                     !collection)
                 {
-                    return std::unexpected(audio_error::platform_error);
+                    return failure(error_code::platform_error);
                 }
 
                 UINT count = 0;
                 if (FAILED(collection->GetCount(&count)))
-                    return std::unexpected(audio_error::platform_error);
+                    return failure(error_code::platform_error);
 
                 const std::wstring default_render = default_device_id(enumerator.Get(), eRender);
                 const std::wstring default_capture = default_device_id(enumerator.Get(), eCapture);
@@ -349,7 +356,7 @@ namespace catalyst::audio::detail
                         continue;
 
                     device_info info;
-                    info.backend = engine_backend::wasapi;
+                    info.backend = backend_kind::wasapi;
 
                     LPWSTR raw_id = nullptr;
                     if (FAILED(device->GetId(&raw_id)) || !raw_id)
@@ -392,24 +399,24 @@ namespace catalyst::audio::detail
                 return devices;
             }
 
-            std::expected<void, audio_error> initialize() override
+            std::expected<void, error> open() override
             {
-                if (config_.direction == stream_direction::duplex)
-                    return std::unexpected(audio_error::unsupported_operation);
+                if (request_.direction == stream_direction::duplex)
+                    return failure(error_code::unsupported_operation);
 
-                shutdown();
+                close();
 
                 const HRESULT com_hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
                 if (FAILED(com_hr) && com_hr != RPC_E_CHANGED_MODE)
-                    return std::unexpected(audio_error::platform_error);
+                    return failure(error_code::platform_error);
                 owns_com_ = SUCCEEDED(com_hr);
 
-                capture_ = config_.direction == stream_direction::input;
+                capture_ = request_.direction == stream_direction::input;
 
                 if (FAILED(CoCreateInstance(
                         __uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator_))))
                 {
-                    return std::unexpected(audio_error::platform_error);
+                    return failure(error_code::platform_error);
                 }
 
                 if (const auto opened = open_device(); !opened)
@@ -423,21 +430,19 @@ namespace catalyst::audio::detail
 
                 register_notifications();
 
-                dispatcher_.reset_time();
+                dispatcher_.rewind();
                 stats_.reset();
-                initialized_ = true;
+                opened_ = true;
                 return {};
             }
 
-            std::expected<void, audio_error> start() override
+            std::expected<void, error> start() override
             {
-                if (!initialized_)
-                    return std::unexpected(audio_error::not_initialized);
-                if (running_)
+                if (!opened_ || running_)
                     return {};
 
                 stopping_.store(false, std::memory_order_release);
-                stream_error_.store(audio_error::none, std::memory_order_relaxed);
+                stream_error_.store(error_code::none, std::memory_order_relaxed);
 
                 // Fill the buffer before the clock starts, or the first period is silence.
                 if (!capture_)
@@ -447,7 +452,7 @@ namespace catalyst::audio::detail
                 }
 
                 if (const HRESULT hr = client_->Start(); FAILED(hr))
-                    return std::unexpected(error_from_hresult(hr));
+                    return failure(error_from_hresult(hr));
 
                 running_ = true;
 
@@ -459,7 +464,7 @@ namespace catalyst::audio::detail
                 {
                     (void)client_->Stop();
                     running_ = false;
-                    return std::unexpected(audio_error::thread_failure);
+                    return failure(error_code::thread_failure);
                 }
 
                 return {};
@@ -493,7 +498,7 @@ namespace catalyst::audio::detail
                 running_ = false;
             }
 
-            void shutdown() noexcept override
+            void close() noexcept override
             {
                 stop();
                 unregister_notifications();
@@ -520,7 +525,8 @@ namespace catalyst::audio::detail
                 channels_ = 0;
                 device_id_.clear();
                 device_name_.clear();
-                initialized_ = false;
+                device_latency_ = seconds{0.0};
+                opened_ = false;
 
                 if (owns_com_)
                 {
@@ -529,24 +535,22 @@ namespace catalyst::audio::detail
                 }
             }
 
-            bool is_running() const noexcept override { return running_; }
+            [[nodiscard]] bool is_running() const noexcept override { return running_; }
 
-            stream_info info() const override
+            [[nodiscard]] stream_info info() const override
             {
                 stream_info out;
-                out.backend = engine_backend::wasapi;
-                out.direction = config_.direction;
+                out.backend = backend_kind::wasapi;
+                out.direction = request_.direction;
                 out.sample_rate = sample_rate_;
                 out.output_channels = capture_ ? 0 : channels_;
                 out.input_channels = capture_ ? channels_ : 0;
-                out.buffer_frames = period_frames_ ? period_frames_ : buffer_frames_;
+                out.output_layout = capture_ ? channel_layout::unspecified : layout_for(channels_);
+                out.block_frames = period_frames_ ? period_frames_ : buffer_frames_;
 
-                const double latency = sample_rate_
-                                           ? static_cast<double>(buffer_frames_) / static_cast<double>(sample_rate_) +
-                                                 device_latency_seconds_
-                                           : 0.0;
-                out.output_latency_seconds = capture_ ? 0.0 : latency;
-                out.input_latency_seconds = capture_ ? latency : 0.0;
+                const seconds latency = frames_to_time(buffer_frames_, sample_rate_) + device_latency_;
+                out.output_latency = capture_ ? seconds{0.0} : latency;
+                out.input_latency = capture_ ? latency : seconds{0.0};
 
                 out.exclusive = exclusive_;
                 out.device_id = device_id_;
@@ -554,7 +558,7 @@ namespace catalyst::audio::detail
                 return out;
             }
 
-            stream_stats stats() const noexcept override
+            [[nodiscard]] stream_stats stats() const noexcept override
             {
                 stream_stats out = stats_.snapshot();
                 if (notify_)
@@ -564,10 +568,27 @@ namespace catalyst::audio::detail
 
             void reset_stats() noexcept override { stats_.reset(); }
 
+            /// The failure the render thread found, if any, clearing it so it is reported once.
+            [[nodiscard]] std::optional<error> take_failure() noexcept override
+            {
+                const error_code code = stream_error_.exchange(error_code::none, std::memory_order_relaxed);
+                if (code == error_code::none)
+                    return std::nullopt;
+                return make_error(code, backend_kind::wasapi);
+            }
+
+            [[nodiscard]] std::uint64_t take_xruns() noexcept override { return stats_.take_xruns(); }
+
         private:
+            /// Every failure from this backend names WASAPI, so the caller's log line does too.
+            [[nodiscard]] static std::unexpected<error> failure(error_code code) noexcept
+            {
+                return std::unexpected(make_error(code, backend_kind::wasapi));
+            }
+
             EDataFlow enumeration_flow() const noexcept
             {
-                switch (config_.direction)
+                switch (request_.direction)
                 {
                 case stream_direction::input:
                     return eCapture;
@@ -629,18 +650,16 @@ namespace catalyst::audio::detail
                 return name;
             }
 
-            /// Resolves `preferred_device` against endpoint IDs first, then friendly names.
+            /// Resolves the request's `device_selector` against the endpoints of this direction.
             ///
-            /// IDs are matched first because friendly names are not unique -- two identical
-            /// headsets produce the same name, and matching on it picks an arbitrary one.
-            std::expected<void, audio_error> open_device()
+            /// The match itself is `device_selector::matches`, the same function `find_device` uses,
+            /// so an endpoint a device picker showed as the match is the endpoint that opens here.
+            std::expected<void, error> open_device()
             {
                 const EDataFlow flow = capture_ ? eCapture : eRender;
 
-                if (!config_.preferred_device.empty())
+                if (request_.device.by != device_selector::match::system_default)
                 {
-                    const std::wstring wanted = utf8_to_wide(config_.preferred_device);
-
                     ComPtr<IMMDeviceCollection> collection;
                     if (SUCCEEDED(enumerator_->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection)) &&
                         collection)
@@ -648,8 +667,6 @@ namespace catalyst::audio::detail
                         UINT count = 0;
                         if (SUCCEEDED(collection->GetCount(&count)))
                         {
-                            ComPtr<IMMDevice> by_name;
-
                             for (UINT i = 0; i < count && !device_; ++i)
                             {
                                 ComPtr<IMMDevice> candidate;
@@ -660,34 +677,27 @@ namespace catalyst::audio::detail
                                 if (FAILED(candidate->GetId(&raw_id)) || !raw_id)
                                     continue;
 
-                                const std::wstring candidate_id = raw_id;
+                                device_info described;
+                                described.id = wide_to_utf8(raw_id);
                                 CoTaskMemFree(raw_id);
+                                described.name = friendly_name(candidate.Get());
 
-                                if (candidate_id == wanted)
-                                {
+                                if (request_.device.matches(described))
                                     device_ = candidate;
-                                    break;
-                                }
-
-                                if (!by_name && friendly_name(candidate.Get()) == config_.preferred_device)
-                                    by_name = candidate;
                             }
-
-                            if (!device_)
-                                device_ = by_name;
                         }
                     }
 
                     // An explicit request that cannot be honoured is an error, not a silent
                     // downgrade to the default endpoint.
                     if (!device_)
-                        return std::unexpected(audio_error::no_device);
+                        return failure(error_code::no_device);
                 }
 
                 if (!device_)
                 {
                     if (FAILED(enumerator_->GetDefaultAudioEndpoint(flow, eConsole, &device_)) || !device_)
-                        return std::unexpected(audio_error::no_device);
+                        return failure(error_code::no_device);
                 }
 
                 LPWSTR raw = nullptr;
@@ -705,13 +715,13 @@ namespace catalyst::audio::detail
                 return {};
             }
 
-            std::expected<void, audio_error> activate_client()
+            std::expected<void, error> activate_client()
             {
                 client_.Reset();
                 if (FAILED(device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &client_)) ||
                     !client_)
                 {
-                    return std::unexpected(audio_error::platform_error);
+                    return failure(error_code::platform_error);
                 }
                 return {};
             }
@@ -722,7 +732,7 @@ namespace catalyst::audio::detail
             /// convert (`AUTOCONVERTPCM`), so the caller keeps the format it asked for rather than
             /// silently receiving the device mix rate. Only if that is refused does the stream fall
             /// back to the mix format, and only when `allow_format_fallback` permits it.
-            std::expected<void, audio_error> negotiate_format()
+            std::expected<void, error> negotiate_format()
             {
                 if (const auto activated = activate_client(); !activated)
                     return std::unexpected(activated.error());
@@ -731,17 +741,17 @@ namespace catalyst::audio::detail
                 REFERENCE_TIME minimum_period = 0;
                 (void)client_->GetDevicePeriod(&default_period, &minimum_period);
 
-                exclusive_ = config_.exclusive;
+                exclusive_ = request_.exclusive;
                 const AUDCLNT_SHAREMODE share_mode =
                     exclusive_ ? AUDCLNT_SHAREMODE_EXCLUSIVE : AUDCLNT_SHAREMODE_SHARED;
 
-                format_ptr desired = make_float32_format(config_.sample_rate, requested_channels());
+                format_ptr desired = make_float32_format(request_.sample_rate, requested_channels());
                 if (!desired)
-                    return std::unexpected(audio_error::platform_error);
+                    return failure(error_code::platform_error);
 
                 const REFERENCE_TIME requested_duration =
-                    config_.frames_per_buffer
-                        ? hns_from_frames(config_.frames_per_buffer, config_.sample_rate)
+                    request_.block_frames
+                        ? hns_from_frames(request_.block_frames, request_.sample_rate)
                         : (exclusive_ ? minimum_period : default_period);
 
                 DWORD flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
@@ -753,8 +763,21 @@ namespace catalyst::audio::detail
                     return finish_negotiation();
                 }
 
-                if (!config_.allow_format_fallback)
-                    return std::unexpected(error_from_hresult(hr));
+                if (!request_.allow_format_fallback)
+                {
+                    // The caller asked for exactly this format and did not get it. Say what the
+                    // device would have taken instead, which is the only actionable part.
+                    error refused = make_error(error_from_hresult(hr), backend_kind::wasapi);
+                    if (refused.code == error_code::format_unsupported)
+                    {
+                        if (const format_ptr offered = mix_format())
+                        {
+                            refused.offered_sample_rate = offered->nSamplesPerSec;
+                            refused.offered_channels = offered->nChannels;
+                        }
+                    }
+                    return std::unexpected(refused);
+                }
 
                 if (!exclusive_)
                 {
@@ -774,16 +797,21 @@ namespace catalyst::audio::detail
                 // Last resort: take the format the device already wants.
                 format_ptr fallback = exclusive_ ? device_native_format() : mix_format();
                 if (!fallback || !is_float32_format(fallback.get()))
-                    return std::unexpected(audio_error::format_unsupported);
+                    return failure(error_code::format_unsupported);
 
                 const REFERENCE_TIME fallback_duration =
-                    config_.frames_per_buffer
-                        ? hns_from_frames(config_.frames_per_buffer, fallback->nSamplesPerSec)
+                    request_.block_frames
+                        ? hns_from_frames(request_.block_frames, fallback->nSamplesPerSec)
                         : (exclusive_ ? minimum_period : default_period);
 
                 hr = try_initialize(share_mode, flags, fallback_duration, fallback.get());
                 if (FAILED(hr))
-                    return std::unexpected(error_from_hresult(hr));
+                {
+                    error refused = make_error(error_from_hresult(hr), backend_kind::wasapi);
+                    refused.offered_sample_rate = fallback->nSamplesPerSec;
+                    refused.offered_channels = fallback->nChannels;
+                    return std::unexpected(refused);
+                }
 
                 active_format_ = std::move(fallback);
                 return finish_negotiation();
@@ -872,16 +900,16 @@ namespace catalyst::audio::detail
                 return nullptr;
             }
 
-            std::expected<void, audio_error> finish_negotiation()
+            std::expected<void, error> finish_negotiation()
             {
                 if (!is_float32_format(active_format_.get()))
-                    return std::unexpected(audio_error::format_unsupported);
+                    return failure(error_code::format_unsupported);
 
                 sample_rate_ = active_format_->nSamplesPerSec;
                 channels_ = active_format_->nChannels;
 
                 if (FAILED(client_->GetBufferSize(&buffer_frames_)) || buffer_frames_ == 0)
-                    return std::unexpected(audio_error::platform_error);
+                    return failure(error_code::platform_error);
 
                 REFERENCE_TIME default_period = 0;
                 REFERENCE_TIME minimum_period = 0;
@@ -893,30 +921,30 @@ namespace catalyst::audio::detail
 
                 REFERENCE_TIME latency = 0;
                 if (SUCCEEDED(client_->GetStreamLatency(&latency)) && latency > 0)
-                    device_latency_seconds_ = static_cast<double>(latency) / 10000000.0;
+                    device_latency_ = seconds{static_cast<double>(latency) / 10000000.0};
 
                 return {};
             }
 
-            uint32_t requested_channels() const noexcept
+            channel_count requested_channels() const noexcept
             {
-                const uint32_t channels = capture_ ? config_.input_channels : config_.output_channels;
+                const channel_count channels = capture_ ? request_.input_channels : request_.output_channels;
                 return channels ? channels : 2;
             }
 
-            std::expected<void, audio_error> create_services()
+            std::expected<void, error> create_services()
             {
                 event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
                 if (!event_)
-                    return std::unexpected(audio_error::platform_error);
+                    return failure(error_code::platform_error);
 
                 if (const HRESULT hr = client_->SetEventHandle(event_); FAILED(hr))
-                    return std::unexpected(error_from_hresult(hr));
+                    return failure(error_from_hresult(hr));
 
                 if (capture_)
                 {
                     if (FAILED(client_->GetService(IID_PPV_ARGS(&capture_client_))) || !capture_client_)
-                        return std::unexpected(audio_error::platform_error);
+                        return failure(error_code::platform_error);
 
                     // Backing store for packets the device flags as silent.
                     silence_.assign(static_cast<size_t>(buffer_frames_) * channels_, 0.0f);
@@ -924,7 +952,7 @@ namespace catalyst::audio::detail
                 else
                 {
                     if (FAILED(client_->GetService(IID_PPV_ARGS(&render_client_))) || !render_client_)
-                        return std::unexpected(audio_error::platform_error);
+                        return failure(error_code::platform_error);
                 }
 
                 return {};
@@ -933,9 +961,9 @@ namespace catalyst::audio::detail
             void register_notifications()
             {
                 notify_ = std::make_shared<notify_state>();
-                notify_->callback = config_.on_device_change;
-                notify_->user = config_.device_change_user;
+                notify_->notices = request_.notices;
                 notify_->watched_device_id = wide_device_id_;
+                notify_->direction = request_.direction;
 
                 notification_client *client = new (std::nothrow) notification_client(notify_);
                 if (!client)
@@ -989,7 +1017,7 @@ namespace catalyst::audio::detail
                         const auto pumped = capture_ ? pump_capture() : pump_output();
                         if (!pumped)
                         {
-                            fail_stream(pumped.error());
+                            fail_stream(pumped.error().code);
                             break;
                         }
 
@@ -1003,14 +1031,14 @@ namespace catalyst::audio::detail
 
                         if (++consecutive_timeouts >= 2)
                         {
-                            fail_stream(audio_error::device_lost);
+                            fail_stream(error_code::device_lost);
                             break;
                         }
 
                         continue;
                     }
 
-                    fail_stream(audio_error::platform_error);
+                    fail_stream(error_code::platform_error);
                     break;
                 }
 
@@ -1021,22 +1049,22 @@ namespace catalyst::audio::detail
                     CoUninitialize();
             }
 
-            /// Records why the stream died and tells the application, once.
-            void fail_stream(audio_error error) noexcept
+            /// Records why the stream died, once. `stream::pump()` collects it from take_failure().
+            void fail_stream(error_code code) noexcept
             {
-                auto expected = audio_error::none;
-                if (!stream_error_.compare_exchange_strong(expected, error, std::memory_order_relaxed))
+                auto expected = error_code::none;
+                if (!stream_error_.compare_exchange_strong(expected, code, std::memory_order_relaxed))
                     return;
 
-                if (notify_ && error == audio_error::device_lost)
-                    notify_->fire(device_change::device_lost, wide_device_id_);
+                if (notify_ && code == error_code::device_lost)
+                    notify_->fire(device_notice::kind::lost, wide_device_id_);
             }
 
-            std::expected<void, audio_error> pump_output() noexcept
+            std::expected<void, error> pump_output() noexcept
             {
                 UINT32 padding = 0;
                 if (const HRESULT hr = client_->GetCurrentPadding(&padding); FAILED(hr))
-                    return std::unexpected(error_from_hresult(hr));
+                    return failure(error_from_hresult(hr));
 
                 if (padding >= buffer_frames_)
                     return {};
@@ -1051,16 +1079,22 @@ namespace catalyst::audio::detail
 
                     BYTE *data = nullptr;
                     if (const HRESULT hr = render_client_->GetBuffer(chunk, &data); FAILED(hr))
-                        return std::unexpected(error_from_hresult(hr));
+                        return failure(error_from_hresult(hr));
 
                     if (!data)
-                        return std::unexpected(audio_error::platform_error);
+                        return failure(error_code::platform_error);
 
                     dispatcher_.dispatch(
-                        reinterpret_cast<float *>(data), nullptr, chunk, channels_, 0, sample_rate_);
+                        std::span<sample>(reinterpret_cast<sample *>(data),
+                                          static_cast<std::size_t>(chunk) * channels_),
+                        {},
+                        chunk,
+                        channels_,
+                        0,
+                        sample_rate_);
 
                     if (const HRESULT hr = render_client_->ReleaseBuffer(chunk, 0); FAILED(hr))
-                        return std::unexpected(error_from_hresult(hr));
+                        return failure(error_from_hresult(hr));
 
                     remaining -= chunk;
                 }
@@ -1068,13 +1102,13 @@ namespace catalyst::audio::detail
                 return {};
             }
 
-            std::expected<void, audio_error> pump_capture() noexcept
+            std::expected<void, error> pump_capture() noexcept
             {
                 for (;;)
                 {
                     UINT32 packet = 0;
                     if (const HRESULT hr = capture_client_->GetNextPacketSize(&packet); FAILED(hr))
-                        return std::unexpected(error_from_hresult(hr));
+                        return failure(error_from_hresult(hr));
 
                     if (packet == 0)
                         return {};
@@ -1087,40 +1121,40 @@ namespace catalyst::audio::detail
                     if (hr == AUDCLNT_S_BUFFER_EMPTY)
                         return {};
                     if (FAILED(hr))
-                        return std::unexpected(error_from_hresult(hr));
+                        return failure(error_from_hresult(hr));
 
                     if (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY)
                         stats_.add_xrun();
 
-                    const float *input = reinterpret_cast<const float *>(data);
+                    const std::size_t needed = static_cast<std::size_t>(frames) * channels_;
+                    std::span<const sample> input(reinterpret_cast<const sample *>(data), needed);
+
                     if ((flags & AUDCLNT_BUFFERFLAGS_SILENT) || !data)
                     {
-                        const size_t needed = static_cast<size_t>(frames) * channels_;
-                        if (silence_.size() < needed)
-                            input = nullptr;
-                        else
-                            input = silence_.data();
+                        input = silence_.size() >= needed
+                                    ? std::span<const sample>(silence_.data(), needed)
+                                    : std::span<const sample>{};
                     }
 
-                    if (input)
-                        dispatcher_.dispatch(nullptr, input, frames, 0, channels_, sample_rate_);
+                    if (!input.empty())
+                        dispatcher_.dispatch({}, input, frames, 0, channels_, sample_rate_);
 
                     if (const HRESULT release = capture_client_->ReleaseBuffer(frames); FAILED(release))
-                        return std::unexpected(error_from_hresult(release));
+                        return failure(error_from_hresult(release));
                 }
             }
 
-            engine_config config_{};
+            open_request request_{};
             stats_block stats_;
             render_dispatcher dispatcher_;
 
             bool owns_com_ = false;
-            bool initialized_ = false;
+            bool opened_ = false;
             bool running_ = false;
             bool capture_ = false;
             bool exclusive_ = false;
             std::atomic<bool> stopping_{false};
-            std::atomic<audio_error> stream_error_{audio_error::none};
+            std::atomic<error_code> stream_error_{error_code::none};
 
             ComPtr<IMMDeviceEnumerator> enumerator_;
             ComPtr<IMMDevice> device_;
@@ -1132,13 +1166,13 @@ namespace catalyst::audio::detail
             std::shared_ptr<notify_state> notify_;
 
             format_ptr active_format_;
-            std::vector<float> silence_;
+            std::vector<sample> silence_;
 
             UINT32 buffer_frames_ = 0;
             UINT32 period_frames_ = 0;
-            uint32_t sample_rate_ = 0;
-            uint32_t channels_ = 0;
-            double device_latency_seconds_ = 0.0;
+            sample_rate_t sample_rate_ = 0;
+            channel_count channels_ = 0;
+            seconds device_latency_{0.0};
 
             std::wstring wide_device_id_;
             std::string device_id_;
@@ -1150,9 +1184,9 @@ namespace catalyst::audio::detail
 
     } // namespace
 
-    std::unique_ptr<backend> create_wasapi_backend_win32(const engine_config &config) noexcept
+    std::unique_ptr<backend> create_wasapi_backend_win32(const open_request &request) noexcept
     {
-        return std::make_unique<wasapi_backend_win32>(config);
+        return std::make_unique<wasapi_backend_win32>(request);
     }
 
 } // namespace catalyst::audio::detail

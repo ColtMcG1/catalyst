@@ -1,14 +1,16 @@
-# The offline and null backends are always compiled, so the module builds, links and tests on
-# every platform. Platform backends are added conditionally and announce themselves to the
-# registry through CATALYST_AUDIO_HAS_* definitions. All backends live in one target: the
-# registry is the only definition of create_backend(), so there is nothing left to isolate and
-# a single target removes any link-order sensitivity between the registry and its factories.
+# The null backend is always compiled, so the module builds, links and tests on every platform, and
+# the offline renderer needs no backend at all. Platform backends are added conditionally and
+# announce themselves to the registry through CATALYST_AUDIO_HAS_* definitions. All backends live in
+# one target: the registry is the only definition of create_backend(), so there is nothing left to
+# isolate and a single target removes any link-order sensitivity between it and its factories.
 add_library(catalyst_audio STATIC
   audio.cpp
-  engine.cpp
   backend_registry.cpp
+  device.cpp
+  error.cpp
+  offline.cpp
+  stream.cpp
   null/audio_backend_null.cpp
-  offline/offline_backend.cpp
 )
 
 add_library(catalyst::audio ALIAS catalyst_audio)
@@ -20,6 +22,9 @@ target_include_directories(catalyst_audio
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# Device and stream events are published to a catalyst::events::bus, which is header-only, so this
+# is an include dependency rather than a link one - it comes in with the include directory above.
 
 set(CATALYST_AUDIO_BACKEND "auto" CACHE STRING "Audio backend (auto|win32|null)")
 set_property(CACHE CATALYST_AUDIO_BACKEND PROPERTY STRINGS auto win32 null)

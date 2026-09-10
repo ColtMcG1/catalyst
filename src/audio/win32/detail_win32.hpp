@@ -2,7 +2,7 @@
  * @file detail_win32.hpp
  * @brief The audio module's Windows-only helpers, shared by the WASAPI and ASIO backends.
  * @details What is genuinely audio-specific -- the mapping from the HRESULTs the audio APIs return
- * onto `audio_error` -- is defined here. The UTF-8 conversion routines that used to live here are
+ * onto `error_code` -- is defined here. The UTF-8 conversion routines that used to live here are
  * now one implementation in src/win32/strings.hpp, shared with the platform and input backends, and
  * are re-exported into this namespace so the backends keep spelling them `win32::wide_to_utf8`.
  * License: CDDL-1.0 (see LICENSE).
@@ -17,7 +17,7 @@
 
 #  include <audioclient.h>
 
-#  include <catalyst/audio/engine.hpp>
+#  include <catalyst/audio/error.hpp>
 
 namespace catalyst::audio::detail::win32
 {
@@ -25,28 +25,28 @@ namespace catalyst::audio::detail::win32
     using ::catalyst::detail::win32::utf8_to_wide;
     using ::catalyst::detail::win32::wide_to_utf8;
 
-    /// Translates the HRESULTs the audio APIs actually return into the module's error type, so
+    /// Translates the HRESULTs the audio APIs actually return into the module's error codes, so
     /// callers can distinguish "someone else owns the device" from "the device vanished" without
-    /// depending on Windows headers.
-    inline audio_error error_from_hresult(HRESULT hr) noexcept
+    /// depending on Windows headers. The backend wraps the result in an `error`, adding itself.
+    inline error_code error_from_hresult(HRESULT hr) noexcept
     {
         switch (hr)
         {
         case S_OK:
-            return audio_error::none;
+            return error_code::none;
         case AUDCLNT_E_DEVICE_INVALIDATED:
-            return audio_error::device_lost;
+            return error_code::device_lost;
         case AUDCLNT_E_DEVICE_IN_USE:
         case AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED:
-            return audio_error::device_busy;
+            return error_code::device_busy;
         case AUDCLNT_E_UNSUPPORTED_FORMAT:
-            return audio_error::format_unsupported;
+            return error_code::format_unsupported;
         case AUDCLNT_E_ENDPOINT_CREATE_FAILED:
-            return audio_error::no_device;
+            return error_code::no_device;
         case E_OUTOFMEMORY:
-            return audio_error::platform_error;
+            return error_code::platform_error;
         default:
-            return audio_error::platform_error;
+            return error_code::platform_error;
         }
     }
 

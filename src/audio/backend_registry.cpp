@@ -1,165 +1,169 @@
 /**
  * @file backend_registry.cpp
- * @brief Resolves `engine_backend::automatic`, reports which backends this build contains, and
- * constructs the selected one. This is the single definition of `create_backend` in the module;
- * platform backends only expose their own factory, so adding or removing one from the build can
- * never produce duplicate or missing symbols.
+ * @brief Which backends this build contains, which one `automatic` means, and the construction of
+ * the chosen one. Also the configuration validation every backend would otherwise repeat.
+ * @details This is the single definition of `create_backend` in the module; platform backends only
+ * expose their own factory, so adding or removing one from the build can never produce duplicate or
+ * missing symbols.
  * License: CDDL-1.0 (see LICENSE).
  */
 
 #include "detail_backend.hpp"
 
-namespace catalyst::audio::detail
+#include <catalyst/audio/backend.hpp>
+
+namespace catalyst::audio
 {
 
     namespace
     {
 
-        // Guards against configurations that no device could satisfy, so backends do not each
-        // re-derive the same sanity checks.
-        constexpr uint32_t min_sample_rate = 4000;
-        constexpr uint32_t max_sample_rate = 768000;
-        constexpr uint32_t max_channels = 64;
-        constexpr uint32_t max_frames_per_buffer = 1u << 20;
+        // Guards against configurations no device could satisfy, so backends do not each re-derive
+        // the same sanity checks.
+        constexpr sample_rate_t min_sample_rate = 4000;
+        constexpr sample_rate_t max_sample_rate = 768000;
+        constexpr channel_count max_channels = 64;
+        constexpr std::uint32_t max_block_frames = 1u << 20;
 
-        bool wants_output(stream_direction direction) noexcept
+        constexpr bool compiled_in(backend_kind kind) noexcept
         {
-            return direction == stream_direction::output || direction == stream_direction::duplex;
-        }
+            switch (kind)
+            {
+            case backend_kind::automatic:
+            case backend_kind::offline:
+            case backend_kind::null:
+                // Offline and null need no platform API, so `automatic` always resolves.
+                return true;
 
-        bool wants_input(stream_direction direction) noexcept
-        {
-            return direction == stream_direction::input || direction == stream_direction::duplex;
-        }
-
-        engine_backend resolve(engine_backend requested) noexcept
-        {
-            if (requested != engine_backend::automatic)
-                return requested;
-
-            // `automatic` never resolves to `offline`: that backend has no clock of its own, so
-            // selecting it implicitly would leave the caller with a stream that never runs.
+            case backend_kind::wasapi:
 #if defined(CATALYST_AUDIO_HAS_WASAPI)
-            return engine_backend::wasapi;
-#elif defined(CATALYST_AUDIO_HAS_ASIO)
-            return engine_backend::asio;
+                return true;
 #else
-            return engine_backend::null;
+                return false;
 #endif
+
+            case backend_kind::asio:
+#if defined(CATALYST_AUDIO_HAS_ASIO)
+                return true;
+#else
+                return false;
+#endif
+
+            case backend_kind::alsa:
+            case backend_kind::coreaudio:
+                return false;
+            }
+            return false;
         }
 
     } // namespace
 
-    std::expected<void, audio_error> validate_config(const engine_config &config) noexcept
+    bool is_available(backend_kind backend) noexcept
     {
-        if (config.sample_rate < min_sample_rate || config.sample_rate > max_sample_rate)
-            return std::unexpected(audio_error::invalid_config);
-
-        if (config.frames_per_buffer > max_frames_per_buffer)
-            return std::unexpected(audio_error::invalid_config);
-
-        if (config.output_channels > max_channels || config.input_channels > max_channels)
-            return std::unexpected(audio_error::invalid_config);
-
-        if (wants_output(config.direction) && config.output_channels == 0)
-            return std::unexpected(audio_error::invalid_config);
-
-        if (wants_input(config.direction) && config.input_channels == 0)
-            return std::unexpected(audio_error::invalid_config);
-
-        // Writing a WAV requires the samples to have been retained.
-        if (!config.offline.wav_path.empty() && !config.offline.capture_output)
-            return std::unexpected(audio_error::invalid_config);
-
-        return {};
+        return compiled_in(backend);
     }
 
-    bool backend_available(engine_backend backend) noexcept
+    backend_kind default_backend() noexcept
     {
-        switch (backend)
-        {
-        case engine_backend::automatic:
-        case engine_backend::offline:
-        case engine_backend::null:
-            // Offline and null are compiled unconditionally, so `automatic` always resolves.
-            return true;
-
-        case engine_backend::wasapi:
+        // Never `offline`: a stream the caller has to advance by hand is not what someone who
+        // asked for "the best available" was after.
 #if defined(CATALYST_AUDIO_HAS_WASAPI)
-            return true;
+        return backend_kind::wasapi;
+#elif defined(CATALYST_AUDIO_HAS_ASIO)
+        return backend_kind::asio;
 #else
-            return false;
+        return backend_kind::null;
 #endif
-
-        case engine_backend::asio:
-#if defined(CATALYST_AUDIO_HAS_ASIO)
-            return true;
-#else
-            return false;
-#endif
-
-        case engine_backend::alsa:
-        case engine_backend::coreaudio:
-            return false;
-        }
-
-        return false;
     }
 
-    std::vector<engine_backend> available_backends()
+    std::vector<backend_kind> available_backends()
     {
-        std::vector<engine_backend> out;
+        std::vector<backend_kind> out;
         out.reserve(4);
 
 #if defined(CATALYST_AUDIO_HAS_WASAPI)
-        out.push_back(engine_backend::wasapi);
+        out.push_back(backend_kind::wasapi);
 #endif
 #if defined(CATALYST_AUDIO_HAS_ASIO)
-        out.push_back(engine_backend::asio);
+        out.push_back(backend_kind::asio);
 #endif
-        out.push_back(engine_backend::offline);
-        out.push_back(engine_backend::null);
+        out.push_back(backend_kind::offline);
+        out.push_back(backend_kind::null);
 
         return out;
     }
 
-    std::expected<std::unique_ptr<backend>, audio_error> create_backend(const engine_config &config)
-    {
-        engine_config resolved = config;
-        resolved.preferred_backend = resolve(config.preferred_backend);
+} // namespace catalyst::audio
 
+namespace catalyst::audio::detail
+{
+
+    backend_kind resolve(backend_kind requested) noexcept
+    {
+        return requested == backend_kind::automatic ? default_backend() : requested;
+    }
+
+    std::expected<void, error> validate(const open_request &request) noexcept
+    {
+        const auto invalid = [&] { return std::unexpected(make_error(error_code::invalid_config, request.backend)); };
+
+        if (request.sample_rate < min_sample_rate || request.sample_rate > max_sample_rate)
+            return invalid();
+
+        if (request.block_frames > max_block_frames)
+            return invalid();
+
+        if (request.output_channels > max_channels || request.input_channels > max_channels)
+            return invalid();
+
+        if (has_output(request.direction) && request.output_channels == 0)
+            return invalid();
+
+        if (has_input(request.direction) && request.input_channels == 0)
+            return invalid();
+
+        return {};
+    }
+
+    std::expected<std::unique_ptr<backend>, error> create_backend(const open_request &request)
+    {
         std::unique_ptr<backend> created;
 
-        switch (resolved.preferred_backend)
+        switch (request.backend)
         {
-        case engine_backend::offline:
-            created = create_offline_backend(resolved);
-            break;
-
-        case engine_backend::null:
-            created = create_null_backend(resolved);
+        case backend_kind::null:
+            created = create_null_backend(request);
             break;
 
 #if defined(CATALYST_AUDIO_HAS_WASAPI)
-        case engine_backend::wasapi:
-            created = create_wasapi_backend_win32(resolved);
+        case backend_kind::wasapi:
+            created = create_wasapi_backend_win32(request);
             break;
 #endif
 
 #if defined(CATALYST_AUDIO_HAS_ASIO)
-        case engine_backend::asio:
-            created = create_asio_backend_win32(resolved);
+        case backend_kind::asio:
+            created = create_asio_backend_win32(request);
             break;
 #endif
 
         default:
-            return std::unexpected(audio_error::backend_unavailable);
+            // Includes `offline`, which is `offline_stream` rather than a device, and every
+            // backend this build does not contain.
+            return std::unexpected(make_error(error_code::backend_unavailable, request.backend));
         }
 
         if (!created)
-            return std::unexpected(audio_error::backend_unavailable);
+            return std::unexpected(make_error(error_code::backend_unavailable, request.backend));
 
         return created;
+    }
+
+    std::expected<std::unique_ptr<backend>, error> create_enumerator(backend_kind kind)
+    {
+        open_request request;
+        request.backend = resolve(kind);
+        return create_backend(request);
     }
 
 } // namespace catalyst::audio::detail

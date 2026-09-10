@@ -1,14 +1,14 @@
-/*
+/**
  * @file main.cpp
- * @brief Example of using the Catalyst Audio Engine to play a test tone.
- * @details This example demonstrates how to initialize the Catalyst Audio Engine, inspect the
- * format the device actually negotiated, set up a callback to render a 440Hz sine wave, and
- * cleanly shut down after playback. The tone is derived from `render_context::stream_time_frames`
- * and the negotiated sample rate rather than from a private counter, which keeps pitch correct
- * even when the device refuses the requested rate. Fades at both ends minimise clicks, and the
- * stream's health counters are logged at the end. Nothing is logged from the render callback: that
- * runs on the device's real-time thread, where formatting a message is exactly the kind of work
- * that produces the xruns it would be reporting.
+ * @brief Plays a 440 Hz test tone through the Catalyst audio module.
+ * @details Shows the shape of an audio program: enumerate what is there, open a stream against it,
+ * hand it a renderer, start it, and pump a bus once a frame so device events arrive somewhere safe.
+ *
+ * Two details are worth copying rather than skimming. The tone is derived from
+ * `render_block::position` and the *negotiated* sample rate rather than from a private counter, so
+ * the pitch stays correct even when the device refuses the rate that was asked for. And nothing is
+ * logged from inside the renderer: that runs on the device's real-time thread, where formatting a
+ * message is exactly the kind of work that produces the xruns it would be reporting.
  * License: CDDL-1.0 (see LICENSE).
  */
 
@@ -21,160 +21,203 @@
 #include <limits>
 #include <thread>
 
+namespace audio = catalyst::audio;
+namespace events = catalyst::events;
 namespace logging = catalyst::logging;
 
-namespace {
-
-/** @brief Names this example in the log's category column. */
-struct example_log
+namespace
 {
-  static constexpr const char *name = "audio_playback";
-};
 
-constexpr double two_pi = 6.2831853071795864769;
-
-struct tone_state
-{
-  double frequency_hz = 440.0;
-  uint64_t fade_frames = 0;
-
-  // Written by main, read by the render thread.
-  std::atomic<uint64_t> stop_begin{std::numeric_limits<uint64_t>::max()};
-};
-
-void render_test_tone(catalyst::audio::render_context& context) noexcept
-{
-  auto* state = static_cast<tone_state*>(context.user);
-  if (!state || !context.output || context.sample_rate == 0)
-    return;
-
-  constexpr float base_gain = 0.2f;
-
-  // Phase is computed from the absolute frame index in double precision. A float accumulator
-  // would drift, and a float frame counter would stop counting exactly after 2^24 frames.
-  const double phase_step = (two_pi * state->frequency_hz) / static_cast<double>(context.sample_rate);
-  const uint64_t stop_begin = state->stop_begin.load(std::memory_order_relaxed);
-
-  for (uint32_t f = 0; f < context.frames; ++f)
-  {
-    const uint64_t frame_index = context.stream_time_frames + f;
-
-    float gain = base_gain;
-
-    // Fade in.
-    if (state->fade_frames != 0 && frame_index < state->fade_frames)
+    /** @brief Names this example in the log's category column. */
+    struct example_log
     {
-      gain *= static_cast<float>(
-          static_cast<double>(frame_index) / static_cast<double>(state->fade_frames));
-    }
+        static constexpr const char *name = "audio_playback";
+    };
 
-    // Fade out once requested.
-    if (stop_begin != std::numeric_limits<uint64_t>::max() && frame_index >= stop_begin)
+    constexpr double two_pi = 6.2831853071795864769;
+
+    /**
+     * @struct tone
+     * @brief The renderer's state. Owned by main, referred to by the renderer, read on the
+     * real-time thread.
+     */
+    struct tone
     {
-      if (state->fade_frames == 0)
-      {
-        gain = 0.0f;
-      }
-      else
-      {
-        const double t =
-            static_cast<double>(frame_index - stop_begin) / static_cast<double>(state->fade_frames);
-        gain *= static_cast<float>(t >= 1.0 ? 0.0 : 1.0 - t);
-      }
-    }
+        double frequency_hz = 440.0;
+        audio::frame_count fade_frames = 0;
 
-    const double phase = std::fmod(static_cast<double>(frame_index) * phase_step, two_pi);
-    const float sample = gain * static_cast<float>(std::sin(phase));
+        /// Written by main, read by the render thread; atomic for that reason and no other.
+        std::atomic<audio::frame_count> stop_begin{std::numeric_limits<audio::frame_count>::max()};
 
-    const uint32_t base = f * context.output_channels;
-    for (uint32_t c = 0; c < context.output_channels; ++c)
-      context.output[base + c] = sample;
-  }
-}
+        /** @brief The gain envelope at an absolute frame index: fade in, hold, fade out. */
+        [[nodiscard]] float gain_at(audio::frame_count frame, audio::frame_count stop) const noexcept
+        {
+            constexpr float base_gain = 0.2f;
+
+            if (fade_frames == 0)
+                return frame >= stop ? 0.0f : base_gain;
+
+            float gain = base_gain;
+
+            if (frame < fade_frames)
+                gain *= static_cast<float>(frame) / static_cast<float>(fade_frames);
+
+            if (frame >= stop)
+            {
+                const double t = static_cast<double>(frame - stop) / static_cast<double>(fade_frames);
+                gain *= static_cast<float>(t >= 1.0 ? 0.0 : 1.0 - t);
+            }
+
+            return gain;
+        }
+    };
 
 } // namespace
 
 int main()
 {
-  using namespace catalyst::audio;
+    catalyst::catalyst_version_anchor();
 
-  catalyst::catalyst_version_anchor();
+    // One console sink, and every line below reaches the terminal, coloured when the terminal
+    // understands colour. Sending the same log to a file is one more add_sink, and no change here.
+    logging::default_logger().add_sink(logging::console_sink{});
 
-  // One console sink, and every line below reaches the terminal, coloured when the terminal
-  // understands colour. Sending the same log to a file is one more add_sink, and no change here.
-  logging::default_logger().add_sink(logging::console_sink{});
+    for (const auto backend : audio::available_backends())
+        logging::info<example_log>("Available backend: {}", backend);
 
-  engine audio_engine;
-  tone_state tone;
-
-  engine_config cfg;
-  cfg.sample_rate = 48000;
-  cfg.output_channels = 2;
-  cfg.frames_per_buffer = 512;
-  cfg.callback = &render_test_tone;
-  cfg.user = &tone;
-
-  for (const auto backend : engine::available_backends())
-    logging::info<example_log>("Available backend: {}", to_string(backend));
-
-  if (const auto devices = engine::devices(engine_backend::automatic); devices)
-  {
-    for (const auto& device : *devices)
+    if (const auto devices = audio::devices(); devices)
     {
-      logging::info<example_log>(
-          " - Device: {}{}, id: {}",
-          device.name,
-          device.is_default ? " (default)" : "",
-          device.id);
+        for (const auto &device : *devices)
+        {
+            logging::info<example_log>(
+                " - Device: {}{}, id: {}",
+                device.name,
+                device.is_default ? " (default)" : "",
+                device.id);
+        }
     }
-  }
 
-  if (const auto result = audio_engine.initialize(cfg); !result)
-  {
-    logging::critical<example_log>("Failed to initialize audio engine: {}", to_string(result.error()));
-    return 1;
-  }
+    tone state;
 
-  // Never assume the request was honoured: the device may have imposed a different rate,
-  // channel count or buffer size.
-  const auto info = audio_engine.info();
-  tone.fade_frames = info.sample_rate / 50; // 20ms
+    // The renderer is named rather than passed inline, because `audio::renderer` refers to it
+    // rather than owning it - a temporary lambda would be gone before the first block. Binding one
+    // is a compile error for that reason.
+    auto render = [&state](audio::render_block &block) noexcept {
+        if (block.output.empty() || block.sample_rate == 0)
+            return;
 
-  logging::info<example_log>("Backend: {}", audio_engine.backend_name());
-  logging::info<example_log>("Device: {}", info.device_name);
-  logging::info<example_log>(
-      "Format: {} Hz, {} ch, {} frames/buffer, {:.2f} ms latency{}",
-      info.sample_rate,
-      info.output_channels,
-      info.buffer_frames,
-      info.output_latency_seconds * 1000.0,
-      info.exclusive ? " (exclusive)" : "");
+        // Phase is computed from the absolute frame index in double precision. A float accumulator
+        // would drift, and a float frame counter would stop counting exactly after 2^24 frames.
+        const double phase_step = (two_pi * state.frequency_hz) / static_cast<double>(block.sample_rate);
+        const auto stop = state.stop_begin.load(std::memory_order_relaxed);
 
-  if (const auto result = audio_engine.start(); !result)
-  {
-    logging::critical<example_log>("Failed to start audio engine: {}", to_string(result.error()));
-    return 1;
-  }
+        for (std::uint32_t f = 0; f < block.frames; ++f)
+        {
+            const audio::frame_count index = block.position + f;
 
-  logging::info<example_log>("Playing {:.0f}Hz test tone for 2 seconds...", tone.frequency_hz);
-  std::this_thread::sleep_for(std::chrono::seconds(2));
+            const double phase = std::fmod(static_cast<double>(index) * phase_step, two_pi);
+            const auto value = static_cast<audio::sample>(
+                state.gain_at(index, stop) * static_cast<float>(std::sin(phase)));
 
-  // Request a short fade-out before stopping to reduce clicks.
-  tone.stop_begin.store(
-      audio_engine.stats().frames_rendered, std::memory_order_relaxed);
-  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            // The frame view removes the interleaving arithmetic, which is where the bugs are.
+            for (audio::sample &channel : block.output_frame(f))
+                channel = value;
+        }
+    };
 
-  audio_engine.stop();
+    // Device and stream events reach listeners from pump(), on this thread - never from the
+    // driver's notification thread. So a listener may do whatever an ordinary function may do.
+    events::bus bus;
 
-  const auto stats = audio_engine.stats();
-  logging::info<example_log>(
-      "Rendered {} frames in {} callbacks; {} xruns, peak load {:.1f}%",
-      stats.frames_rendered,
-      stats.callback_count,
-      stats.xruns,
-      stats.peak_load * 100.0);
+    bool device_lost = false;
 
-  audio_engine.shutdown();
+    auto lost_token = bus.add_listener<audio::device_lost_event>(
+        [&device_lost](const audio::device_lost_event &event) {
+            logging::error<example_log>("Device lost: {}", event.device_id);
+            device_lost = true;
+        });
 
-  return 0;
+    auto xrun_token = bus.add_listener<audio::xrun_event>(
+        [](const audio::xrun_event &event) {
+            logging::warn<example_log>("{} xrun(s), {} total", event.count, event.total);
+        });
+
+    auto default_token = bus.add_listener<audio::default_device_changed_event>(
+        [](const audio::default_device_changed_event &event) {
+            // Note what this does *not* do: a running stream is not moved to the new default.
+            // Whether following it is right depends on the program, so the module leaves it here.
+            logging::info<example_log>("Default {} device is now {}", event.direction, event.device_id);
+        });
+
+    audio::stream_config config;
+    config.sample_rate = 48000;
+    config.output_channels = 2;
+    config.block_frames = 512;
+    config.bus = &bus;
+
+    auto stream = audio::stream::open(config, render);
+    if (!stream)
+    {
+        // The error formats as a whole sentence: which backend, what failed, and what the device
+        // would have accepted instead.
+        logging::critical<example_log>("Failed to open audio stream: {}", stream.error());
+        return 1;
+    }
+
+    // Never assume the request was honoured: the device may have imposed a different rate, channel
+    // count or block size, and with fallback enabled it does so silently and successfully.
+    const audio::stream_info &info = stream->info();
+    state.fade_frames = info.sample_rate / 50; // 20 ms
+
+    logging::info<example_log>("Backend: {}", stream->backend());
+    logging::info<example_log>("Device: {}", info.device_name);
+    logging::info<example_log>(
+        "Format: {} Hz, {} ch ({}), {} frames/block, {:.2f} ms latency{}",
+        info.sample_rate,
+        info.output_channels,
+        info.output_layout,
+        info.block_frames,
+        std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(info.output_latency).count(),
+        info.exclusive ? " (exclusive)" : "");
+
+    if (const auto started = stream->start(); !started)
+    {
+        logging::critical<example_log>("Failed to start audio stream: {}", started.error());
+        return 1;
+    }
+
+    logging::info<example_log>("Playing {:.0f} Hz test tone for 2 seconds...", state.frequency_hz);
+
+    // A real program pumps once a frame. This one has no frames, so it pumps on a timer - the point
+    // being that events arrive here, in the loop, and not on whichever thread noticed them.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline && !device_lost)
+    {
+        stream->pump();
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+
+    if (!device_lost)
+    {
+        // Ask for a fade-out before stopping, so the tone ends rather than being cut off.
+        state.stop_begin.store(stream->stats().frames_rendered, std::memory_order_relaxed);
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    }
+
+    stream->stop();
+    stream->pump();
+
+    const audio::stream_stats stats = stream->stats();
+    logging::info<example_log>(
+        "Rendered {} frames in {} blocks; {} xruns, peak load {:.1f}%",
+        stats.frames_rendered,
+        stats.blocks,
+        stats.xruns,
+        stats.peak_load * 100.0);
+
+    lost_token.remove();
+    xrun_token.remove();
+    default_token.remove();
+
+    return 0;
 }
