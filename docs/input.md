@@ -77,7 +77,7 @@ immediately.
 | `gamepad_deadzone_calibrator`, `deadzone_for_noise` in `gamepad.hpp` | `input/calibration.hpp` | Calibration is a tool built *on* the gamepad API, not part of it. `gamepad.hpp` shrinks to vocabulary + events. |
 | `calibrate_gamepad_deadzone()` (blocking, `sleep_for` in a loop) | `examples/input_calibration` | A library core should not sleep. The frame-driven calibrator does the same job inside a normal loop; the blocking convenience belongs to the program that wants it. |
 | `text_input_event` in `keyboard.hpp` | `input/text.hpp` | Text is not a physical key. Separating it makes room for IME composition events, which real i18n needs and which have nothing to do with `key_code`. |
-| `platform::set_event_sink()` publishing input events | `platform::set_input_system()` feeding `input::context` | Platform translates window messages; it should not also be an input event publisher. Now *all* input events reach the bus through the registry, so the registry can never disagree with the event stream (see choice 1). |
+| `platform::set_event_sink()` publishing input events | `platform::set_input_feed()` feeding `input::context` | Platform translates window messages; it should not also be an input event publisher. Now *all* input events reach the bus through the registry, so the registry can never disagree with the event stream (see choice 1). |
 | `input/midi.hpp` (empty stub) | `input/midi.hpp` (real vocabulary + events) | — |
 | MIDI *synthesis* | stays out; belongs to `catalyst::audio` | A MIDI keyboard is an input device. A MIDI synthesiser is an audio one. |
 
@@ -205,24 +205,30 @@ the registry, a `bench/input` for action evaluation cost, sensors (accelerometer
 `quaternion` controls are already in the model), and player-device pairing for local
 multiplayer.
 
-## What is left
+## The platform seam
 
-The input module builds and its tests pass on their own. Two things outside it still need doing,
-and neither is an input-module change:
+The platform module has been ported to match. It now has two separate installers, and which one an
+event goes to is decided by what produced it, not by what it is:
 
-1. **The platform module has not been ported to `events::bus`.** Its window events
-   (`window_resized_event` and friends in `platform/window.hpp`) still inherit the deleted
-   `core::event<>`, its backends still buffer through the deleted `core::event_queue`, and
-   `platform::poll_event()` still hands back a `core::event_base`. That port also has a design
-   question in it that is not mine to answer: whether the platform keeps a polling mode at all now
-   that there is a bus.
-2. **`platform::set_input_feed(input::event_feed*)` replaces `platform::set_event_sink()`.** The
-   backend stops constructing and publishing input events and instead calls the feed. It also gets
-   to delete its per-window `std::bitset<key_code_count> keys_down`, which existed only to
-   synthesise releases on focus loss - `feed_focus_lost()` does that from the registry now.
+- `platform::set_event_bus(events::bus*)` takes the window events declared in `platform/window.hpp`
+  and `platform/monitor.hpp`. They are plain structs now; the bus keys on the static type, so they
+  need no base class.
+- `platform::set_input_feed(input::event_feed*)` takes everything a keyboard, mouse, touchscreen or
+  pen produced. The backend no longer builds input events and publishes them itself - it calls the
+  feed, `input::context` implements it, and the registry publishes onward. That is what makes it
+  impossible for the event stream and the device state to disagree.
 
-`examples/input_events` is written against the finished API and will build once (2) lands;
-`examples/input_actions` is the headless equivalent and builds today.
+The win32 backend's per-window `std::bitset<key_code_count> keys_down` is gone with it: it existed
+only to synthesise releases on focus loss, and `feed_focus_lost()` now does that from the state the
+registry already owns. The backend still tracks held mouse *buttons*, but only for the
+SetCapture/ReleaseCapture lifecycle, which is genuinely its own business.
+
+The old `poll_event()` queue went too, along with its bound and its coalescing policy. The one
+problem it solved - the OS holding the thread inside a modal size/move loop while resizes pile up -
+is solved better by the frame callback, which hands control back mid-loop so the application renders
+the current size instead of catching up on a queue of stale ones. See `platform::set_frame_callback`.
+
+Both `examples/input_events` (windowed) and `examples/input_actions` (headless) build and run.
 
 ## Conventions
 

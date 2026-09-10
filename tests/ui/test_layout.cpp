@@ -94,8 +94,8 @@ namespace
         run(t, root, 400.0f, 100.0f);
 
         // The first child sits at the main-start, which for row_reverse is on the right.
-        CT_REQUIRE(near(box(t, b).min.x, 0.0f));
-        CT_REQUIRE(near(box(t, a).min.x, 100.0f));
+        CT_REQUIRE(near(box(t, b).min.x(), 0.0f));
+        CT_REQUIRE(near(box(t, a).min.x(), 100.0f));
     }
 
     void test_padding_and_border_offset_content()
@@ -162,8 +162,8 @@ namespace
 
         run(t, root, 400.0f, 100.0f);
 
-        CT_REQUIRE(near(box(t, a).min.x, 10.0f));
-        CT_REQUIRE(near(box(t, b).min.x, 130.0f));
+        CT_REQUIRE(near(box(t, a).min.x(), 10.0f));
+        CT_REQUIRE(near(box(t, b).min.x(), 130.0f));
         CT_REQUIRE(near_rect(t.layout_of(a).margin_box(), 0.0f, 0.0f, 130.0f, 10.0f));
     }
 
@@ -198,10 +198,10 @@ namespace
 
         run(t, root, 400.0f, 50.0f);
 
-        CT_REQUIRE(near(box(t, a).min.x, 0.0f));
-        CT_REQUIRE(near(box(t, a).max.x - box(t, a).min.x, 100.0f));
-        CT_REQUIRE(near(box(t, b).min.x, 100.0f));
-        CT_REQUIRE(near(box(t, b).max.x - box(t, b).min.x, 300.0f));
+        CT_REQUIRE(near(box(t, a).min.x(), 0.0f));
+        CT_REQUIRE(near(box(t, a).max.x() - box(t, a).min.x(), 100.0f));
+        CT_REQUIRE(near(box(t, b).min.x(), 100.0f));
+        CT_REQUIRE(near(box(t, b).max.x() - box(t, b).min.x(), 300.0f));
     }
 
     void test_flex_shrink_absorbs_overflow()
@@ -219,9 +219,9 @@ namespace
 
         run(t, root, 100.0f, 50.0f);
 
-        CT_REQUIRE(near(box(t, a).max.x - box(t, a).min.x, 50.0f));
-        CT_REQUIRE(near(box(t, b).max.x - box(t, b).min.x, 50.0f));
-        CT_REQUIRE(near(box(t, b).min.x, 50.0f));
+        CT_REQUIRE(near(box(t, a).max.x() - box(t, a).min.x(), 50.0f));
+        CT_REQUIRE(near(box(t, b).max.x() - box(t, b).min.x(), 50.0f));
+        CT_REQUIRE(near(box(t, b).min.x(), 50.0f));
     }
 
     void test_flex_shrink_respects_zero_factor()
@@ -240,8 +240,8 @@ namespace
 
         run(t, root, 100.0f, 50.0f);
 
-        CT_REQUIRE(near(box(t, fixed).max.x - box(t, fixed).min.x, 80.0f));
-        CT_REQUIRE(near(box(t, flexible).max.x - box(t, flexible).min.x, 20.0f));
+        CT_REQUIRE(near(box(t, fixed).max.x() - box(t, fixed).min.x(), 80.0f));
+        CT_REQUIRE(near(box(t, flexible).max.x() - box(t, flexible).min.x(), 20.0f));
     }
 
     void test_max_width_redistributes_to_siblings()
@@ -261,8 +261,8 @@ namespace
         run(t, root, 300.0f, 50.0f);
 
         // The capped item freezes at its bound and what it could not take goes to its sibling.
-        CT_REQUIRE(near(box(t, capped).max.x - box(t, capped).min.x, 50.0f));
-        CT_REQUIRE(near(box(t, rest).max.x - box(t, rest).min.x, 250.0f));
+        CT_REQUIRE(near(box(t, capped).max.x() - box(t, capped).min.x(), 50.0f));
+        CT_REQUIRE(near(box(t, rest).max.x() - box(t, rest).min.x(), 250.0f));
     }
 
     void test_min_width_is_honored_when_shrinking()
@@ -281,8 +281,8 @@ namespace
 
         run(t, root, 100.0f, 50.0f);
 
-        CT_REQUIRE(near(box(t, floored).max.x - box(t, floored).min.x, 80.0f));
-        CT_REQUIRE(near(box(t, other).max.x - box(t, other).min.x, 20.0f));
+        CT_REQUIRE(near(box(t, floored).max.x() - box(t, floored).min.x(), 80.0f));
+        CT_REQUIRE(near(box(t, other).max.x() - box(t, other).min.x(), 20.0f));
     }
 
     void test_gap_between_children()
@@ -301,8 +301,8 @@ namespace
 
         run(t, root, 400.0f, 50.0f);
 
-        CT_REQUIRE(near(box(t, a).min.x, 0.0f));
-        CT_REQUIRE(near(box(t, b).min.x, 120.0f));
+        CT_REQUIRE(near(box(t, a).min.x(), 0.0f));
+        CT_REQUIRE(near(box(t, b).min.x(), 120.0f));
     }
 
     void test_justify_content()
@@ -321,29 +321,29 @@ namespace
             t.mutable_style(b).width = px(100.0f);
 
             run(t, root, 400.0f, 50.0f);
-            return extent{box(t, a).min.x, box(t, b).min.x};
+            return extent{box(t, a).min.x(), box(t, b).min.x()};
         };
 
         const extent start = positions(justify::start);
-        CT_REQUIRE(near(start.x, 0.0f) && near(start.y, 100.0f));
+        CT_REQUIRE(near(start.x(), 0.0f) && near(start.y(), 100.0f));
 
         const extent end = positions(justify::end);
-        CT_REQUIRE(near(end.x, 200.0f) && near(end.y, 300.0f));
+        CT_REQUIRE(near(end.x(), 200.0f) && near(end.y(), 300.0f));
 
         const extent center = positions(justify::center);
-        CT_REQUIRE(near(center.x, 100.0f) && near(center.y, 200.0f));
+        CT_REQUIRE(near(center.x(), 100.0f) && near(center.y(), 200.0f));
 
         const extent between = positions(justify::space_between);
-        CT_REQUIRE(near(between.x, 0.0f) && near(between.y, 300.0f));
+        CT_REQUIRE(near(between.x(), 0.0f) && near(between.y(), 300.0f));
 
         // 200px spare over two items: 50 before each and 50 after each.
         const extent around = positions(justify::space_around);
-        CT_REQUIRE(near(around.x, 50.0f) && near(around.y, 250.0f));
+        CT_REQUIRE(near(around.x(), 50.0f) && near(around.y(), 250.0f));
 
         // 200px spare over three gaps of 66.67.
         const extent evenly = positions(justify::space_evenly);
-        CT_REQUIRE(near(evenly.x, 200.0f / 3.0f, 0.01f));
-        CT_REQUIRE(near(evenly.y, 100.0f + 400.0f / 3.0f, 0.01f));
+        CT_REQUIRE(near(evenly.x(), 200.0f / 3.0f, 0.01f));
+        CT_REQUIRE(near(evenly.y(), 100.0f + 400.0f / 3.0f, 0.01f));
     }
 
     void test_align_items()
@@ -363,9 +363,9 @@ namespace
             return box(t, a);
         };
 
-        CT_REQUIRE(near(cross_position(align::start).min.y, 0.0f));
-        CT_REQUIRE(near(cross_position(align::end).min.y, 150.0f));
-        CT_REQUIRE(near(cross_position(align::center).min.y, 75.0f));
+        CT_REQUIRE(near(cross_position(align::start).min.y(), 0.0f));
+        CT_REQUIRE(near(cross_position(align::end).min.y(), 150.0f));
+        CT_REQUIRE(near(cross_position(align::center).min.y(), 75.0f));
 
         // A definite cross size is not stretched.
         CT_REQUIRE(near_rect(cross_position(align::stretch), 0.0f, 0.0f, 50.0f, 50.0f));
@@ -428,7 +428,7 @@ namespace
         run(t, root, 400.0f, 400.0f);
 
         // The min bound bites after the children were placed, so they are placed again against it.
-        CT_REQUIRE(near(box(t, root).max.y - box(t, root).min.y, 300.0f));
+        CT_REQUIRE(near(box(t, root).max.y() - box(t, root).min.y(), 300.0f));
         CT_REQUIRE(near_rect(box(t, a), 0.0f, 0.0f, 50.0f, 300.0f));
     }
 
@@ -454,7 +454,7 @@ namespace
         CT_REQUIRE(t.layout_of(hidden).hidden);
         CT_REQUIRE(!t.layout_of(hidden).laid_out);
         CT_REQUIRE(t.layout_of(inner).hidden);
-        CT_REQUIRE(near(box(t, visible).min.x, 0.0f));
+        CT_REQUIRE(near(box(t, visible).min.x(), 0.0f));
     }
 
     void test_relative_offset_does_not_move_siblings()
@@ -477,7 +477,7 @@ namespace
         run(t, root, 400.0f, 100.0f);
 
         CT_REQUIRE(near_rect(box(t, a), 15.0f, 5.0f, 100.0f, 10.0f));
-        CT_REQUIRE(near(box(t, b).min.x, 100.0f));
+        CT_REQUIRE(near(box(t, b).min.x(), 100.0f));
     }
 
     void test_absolute_positioning()
@@ -556,8 +556,8 @@ namespace
         run(t, root, 200.0f, 600.0f);
 
         // 400 units of content reflowed into 200 gives two 20px lines.
-        CT_REQUIRE(near(box(t, leaf).max.x - box(t, leaf).min.x, 200.0f));
-        CT_REQUIRE(near(box(t, leaf).max.y - box(t, leaf).min.y, 40.0f));
+        CT_REQUIRE(near(box(t, leaf).max.x() - box(t, leaf).min.x(), 200.0f));
+        CT_REQUIRE(near(box(t, leaf).max.y() - box(t, leaf).min.y(), 40.0f));
     }
 
     void test_font_size_inherits_for_em()
@@ -581,11 +581,11 @@ namespace
 
         CT_REQUIRE(near(t.layout_of(root).font_px, 20.0f));
         CT_REQUIRE(near(t.layout_of(a).font_px, 20.0f));
-        CT_REQUIRE(near(box(t, a).max.x - box(t, a).min.x, 40.0f));
+        CT_REQUIRE(near(box(t, a).max.x() - box(t, a).min.x(), 40.0f));
 
         // The node's own font_size resolves against the parent's, then its em uses the new size.
         CT_REQUIRE(near(t.layout_of(b).font_px, 40.0f));
-        CT_REQUIRE(near(box(t, b).max.x - box(t, b).min.x, 40.0f));
+        CT_REQUIRE(near(box(t, b).max.x() - box(t, b).min.x(), 40.0f));
     }
 
     void test_dpi_scale_applies_to_dp()

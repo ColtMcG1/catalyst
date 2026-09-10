@@ -1,18 +1,18 @@
 /**
  * @file geometry.hpp
  * @brief Defines the geometric primitives used throughout the catalyst::ui module.
- * @details The UI module reuses the vector and rectangle types from catalyst::math rather than
- * defining its own, and adds the two shapes that a box model needs but a general math library does
- * not: `edges` (a value per box side, used for margin, border and padding) and `corners` (a value
- * per box corner, used for border radii). Both are templates so the same shape can carry unresolved
- * `length` measurements in a style and resolved pixel floats in a layout result.
+ * @details The UI module reuses the vector types from the math library rather than defining its own,
+ * and adds the shapes that a box model needs but a general math library does not: `rect` (an
+ * axis-aligned box in UI space), `edges` (a value per box side, used for margin, border and padding)
+ * and `corners` (a value per box corner, used for border radii). The latter two are templates so the
+ * same shape can carry unresolved `length` measurements in a style and resolved pixel floats in a
+ * layout result.
  * License: CDDL-1.0 (see LICENSE).
  */
 
 #pragma once
 
-#include <catalyst/math/rect.hpp>
-#include <catalyst/math/vec.hpp>
+#include <catalyst/math/vector.hpp>
 #include <catalyst/ui/measurement.hpp>
 
 namespace catalyst::ui
@@ -31,12 +31,124 @@ namespace catalyst::ui
     using extent = math::vec2<float>;
 
     /**
-     * @typedef rect
+     * @struct rect
      * @brief An axis-aligned rectangle in UI space, in pixels.
-     * @details Uses the min/max representation from catalyst::math, so `min` is the top-left corner
-     * and `max` is the bottom-right corner.
+     * @details Stored as two corners rather than a position and a size, because the box model steps
+     * inwards and outwards between boxes (see `deflate` and `inflate`) far more often than it reads a
+     * size back out. `min` is the top-left corner and `max` is the bottom-right one; with y increasing
+     * downwards a well-formed rectangle has `min <= max` on both axes.
      */
-    using rect = math::rect<float>;
+    struct rect
+    {
+        /**
+         * @brief The top-left corner of the rectangle.
+         */
+        point min{};
+
+        /**
+         * @brief The bottom-right corner of the rectangle.
+         */
+        point max{};
+
+        /**
+         * @fn from_min_max
+         * @brief Builds a rectangle from its two corners.
+         * @param min_ The top-left corner.
+         * @param max_ The bottom-right corner.
+         * @return The rectangle spanning the two corners.
+         */
+        [[nodiscard]] static constexpr rect from_min_max(const point &min_, const point &max_) noexcept
+        {
+            return rect{min_, max_};
+        }
+
+        /**
+         * @fn from_pos_size
+         * @brief Builds a rectangle from its top-left corner and its size.
+         * @param pos The top-left corner.
+         * @param size_ The width and height, in pixels.
+         * @return The rectangle covering `pos` to `pos + size_`.
+         */
+        [[nodiscard]] static constexpr rect from_pos_size(const point &pos, const extent &size_) noexcept
+        {
+            return rect{pos, point{pos.x() + size_.x(), pos.y() + size_.y()}};
+        }
+
+        /**
+         * @fn from_xywh
+         * @brief Builds a rectangle from separate position and size components.
+         * @param x The x coordinate of the top-left corner.
+         * @param y The y coordinate of the top-left corner.
+         * @param w The width, in pixels.
+         * @param h The height, in pixels.
+         * @return The rectangle covering (x, y) to (x + w, y + h).
+         */
+        [[nodiscard]] static constexpr rect from_xywh(float x, float y, float w, float h) noexcept
+        {
+            return rect{point{x, y}, point{x + w, y + h}};
+        }
+
+        /**
+         * @fn size
+         * @brief Returns the width and height of the rectangle.
+         * @return The extent of the rectangle, in pixels.
+         */
+        [[nodiscard]] constexpr extent size() const noexcept { return extent{max.x() - min.x(), max.y() - min.y()}; }
+
+        /**
+         * @fn width
+         * @brief Returns the width of the rectangle, in pixels.
+         */
+        [[nodiscard]] constexpr float width() const noexcept { return max.x() - min.x(); }
+
+        /**
+         * @fn height
+         * @brief Returns the height of the rectangle, in pixels.
+         */
+        [[nodiscard]] constexpr float height() const noexcept { return max.y() - min.y(); }
+
+        /**
+         * @fn center
+         * @brief Returns the midpoint of the rectangle.
+         */
+        [[nodiscard]] constexpr point center() const noexcept
+        {
+            return point{(min.x() + max.x()) * 0.5f, (min.y() + max.y()) * 0.5f};
+        }
+
+        /**
+         * @fn is_empty
+         * @brief Whether the rectangle encloses no area, i.e. it is collapsed or inverted on either axis.
+         */
+        [[nodiscard]] constexpr bool is_empty() const noexcept { return !(max.x() > min.x() && max.y() > min.y()); }
+
+        /**
+         * @fn contains
+         * @brief Whether a point lies inside the rectangle.
+         * @details Half-open: the `min` edges are inside and the `max` edges are not, so adjacent boxes
+         * tile the plane without a point belonging to two of them.
+         * @param p The point to test, in the same space as the rectangle.
+         * @return True if the point is inside.
+         */
+        [[nodiscard]] constexpr bool contains(const point &p) const noexcept
+        {
+            return p.x() >= min.x() && p.x() < max.x() && p.y() >= min.y() && p.y() < max.y();
+        }
+
+        /**
+         * @fn intersects
+         * @brief Whether this rectangle and another overlap on a non-zero area.
+         */
+        [[nodiscard]] constexpr bool intersects(const rect &other) const noexcept
+        {
+            return min.x() < other.max.x() && other.min.x() < max.x() && min.y() < other.max.y() && other.min.y() < max.y();
+        }
+
+        /**
+         * @brief Compares two rectangles corner by corner.
+         */
+        [[nodiscard]] constexpr bool operator==(const rect &other) const noexcept = default;
+    };
 
     /**
      * @struct edges
@@ -215,10 +327,10 @@ namespace catalyst::ui
      */
     [[nodiscard]] constexpr rect deflate(const rect &r, const edges_px &e) noexcept
     {
-        const float min_x = r.min.x + e.left;
-        const float min_y = r.min.y + e.top;
-        const float max_x = r.max.x - e.right;
-        const float max_y = r.max.y - e.bottom;
+        const float min_x = r.min.x() + e.left;
+        const float min_y = r.min.y() + e.top;
+        const float max_x = r.max.x() - e.right;
+        const float max_y = r.max.y() - e.bottom;
 
         return rect{point{min_x, min_y}, point{(max_x < min_x) ? min_x : max_x, (max_y < min_y) ? min_y : max_y}};
     }
@@ -234,7 +346,7 @@ namespace catalyst::ui
      */
     [[nodiscard]] constexpr rect inflate(const rect &r, const edges_px &e) noexcept
     {
-        return rect{point{r.min.x - e.left, r.min.y - e.top}, point{r.max.x + e.right, r.max.y + e.bottom}};
+        return rect{point{r.min.x() - e.left, r.min.y() - e.top}, point{r.max.x() + e.right, r.max.y() + e.bottom}};
     }
 
     /**

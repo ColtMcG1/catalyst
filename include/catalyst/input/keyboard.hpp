@@ -421,8 +421,8 @@ namespace catalyst::input
      * @struct key_event
      * @brief One physical key press, auto-repeat or release. Key events describe *physical* keys (see key_code); for the
      * characters the user actually typed, listen for text_input_event instead (see text.hpp).
-     * @details When a window loses focus the platform layer synthesises a release for every key it still considers held,
-     * so no consumer is left with a key stuck down.
+     * @details When a window loses focus the registry synthesises a release for every key it still holds, so no consumer
+     * is left with a key stuck down. The platform layer only reports the focus loss; see input::event_feed.
      */
     struct key_event : device_event<tags::key>
     {

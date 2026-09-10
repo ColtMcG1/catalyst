@@ -1,4 +1,4 @@
-#include "../core/test_common.hpp"
+#include "../test_common.hpp"
 
 #include <catalyst/input/keyboard.hpp>
 #include <catalyst/input/mouse.hpp>

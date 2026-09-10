@@ -65,8 +65,8 @@ namespace catalyst::ui
             p.context.dpi_scale = dpi_scale;
             p.context.dpi_x = dpi_scale * 96.0f;
             p.context.dpi_y = dpi_scale * 96.0f;
-            p.context.viewport_width_px = viewport.x;
-            p.context.viewport_height_px = viewport.y;
+            p.context.viewport_width_px = viewport.x();
+            p.context.viewport_height_px = viewport.y();
             p.available = viewport;
             return p;
         }

@@ -118,7 +118,7 @@ int main()
 
     auto client_extent = [&]() -> rendering::extent2d {
         const auto client = platform::client_rect_px(w);
-        return {static_cast<std::uint32_t>(client.size().x), static_cast<std::uint32_t>(client.size().y)};
+        return {static_cast<std::uint32_t>(client.size().x()), static_cast<std::uint32_t>(client.size().y())};
     };
 
     rendering::swapchain_desc sd;

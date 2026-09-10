@@ -1,21 +1,20 @@
 /**
  * @file window_backend_null.cpp
  * @brief The headless implementation of the Catalyst platform window backend. It keeps the same observable behaviour as a
- * real backend -- ids, per-window state, the single event delivery path, the bounded queue -- entirely in memory, so code
- * that drives windows can be built and tested on machines with no window system at all.
+ * real backend -- ids, per-window state, the event bus and input feed seams -- entirely in memory, so code that drives
+ * windows can be built and tested on machines with no window system at all.
  * License: CDDL-1.0 (see LICENSE).
  */
 
 #include "../detail_backend.hpp"
 
-#include <catalyst/core/event_queue.hpp>
-#include <catalyst/core/event_sink.hpp>
+#include <catalyst/events/bus.hpp>
+#include <catalyst/input/feed.hpp>
 
 #include <algorithm>
 #include <chrono>
-#include <memory>
 #include <string>
-#include <type_traits>
+#include <thread>
 #include <unordered_map>
 
 namespace catalyst::platform::detail
@@ -23,14 +22,11 @@ namespace catalyst::platform::detail
 
     namespace
     {
-        /** @brief Default bound on the poll_event() queue; matches the win32 backend. */
-        constexpr std::size_t k_default_event_queue_capacity = 4096;
-
         struct window_state
         {
             window_id id = 0;
             std::string title;
-            catalyst::math::rect<std::int32_t> rect_px{{0, 0}, {0, 0}};
+            platform::rect_px rect_px{};
             math::vec2<std::int32_t> position_px{0, 0};
             math::vec2<std::int32_t> min_size_px{0, 0};
             math::vec2<std::int32_t> max_size_px{0, 0};
@@ -51,57 +47,31 @@ namespace catalyst::platform::detail
         std::unordered_map<window_id, window_state> g_windows;
 
         /**
-         * @var g_events
-         * @brief Events waiting to be drained by poll_event(). The bound, the drop-oldest policy behind it and the
-         * coalescing of same-slot events all live in core::event_queue; this backend only decides which of its event types
-         * are coalescible (see enqueue_event).
+         * @var g_bus
+         * @brief The bus window events are dispatched to, or nullptr when nobody is listening.
          */
-        core::event_queue g_events{k_default_event_queue_capacity};
-
-        core::event_sink *g_event_sink = nullptr;
+        events::bus *g_bus = nullptr;
 
         /**
-         * @brief Marks the event types whose queued instances may be replaced by a newer one for the same window. This is
-         * only the policy; the mechanism is core::event_queue's, driven by the coalesce key enqueue_event stamps on.
+         * @var g_feed
+         * @brief The feed window-sourced input is delivered to, or nullptr. A headless backend has no OS to translate
+         * input from, so it never calls the feed itself; it is held so that input_feed() reports what was installed and a
+         * test can check the wiring without a window system.
          */
-        template <typename E>
-        struct coalescing_event : std::false_type
-        {
-        };
-        template <>
-        struct coalescing_event<window_resized_event> : std::true_type
-        {
-        };
-        template <>
-        struct coalescing_event<window_moved_event> : std::true_type
-        {
-        };
+        input::event_feed *g_feed = nullptr;
 
         /**
-         * @fn enqueue_event
-         * @brief Timestamps an event and delivers it through exactly one path: the sink if installed, otherwise the
-         * poll_event() queue (see the win32 backend for the full rationale). Publishing from the value itself keeps the
-         * sink path free of allocation.
+         * @fn dispatch_event
+         * @brief Dispatches a window event to the installed bus, or drops it if there is none.
+         * @details The bus keys on the static event type, so there is nothing to stamp and nothing to allocate: the event
+         * is dispatched from the value itself. Events are not retained when no bus is installed -- see
+         * platform::set_event_bus for why there is no queue behind this any more.
          */
         template <typename E>
-        void enqueue_event(E e)
+        void dispatch_event(E e)
         {
-            e.stamp();
-
-            if (g_event_sink)
-            {
-                g_event_sink->publish(e);
-                return;
-            }
-
-            if constexpr (coalescing_event<E>::value)
-            {
-                // Window ids start at 1, so a window id is never core::no_coalescing. Keying on the window is what stops
-                // one window's resizes swallowing another's.
-                e.set_coalesce_key(static_cast<core::coalesce_key>(e.window));
-            }
-
-            g_events.push(std::make_unique<E>(std::move(e)));
+            if (g_bus)
+                g_bus->dispatch(std::move(e));
         }
 
         std::int32_t resolve_px(const ui::length &v, ui::axis a, float dpi_scale) noexcept
@@ -120,23 +90,23 @@ namespace catalyst::platform::detail
             return (it == g_windows.end()) ? nullptr : &it->second;
         }
 
-        void enqueue_created_events(window_id id, const window_state &s)
+        void dispatch_created_events(window_id id, const window_state &s)
         {
             window_resized_event e;
             e.window = id;
-            e.width_px = ui::px(static_cast<float>(s.rect_px.size().x));
-            e.height_px = ui::px(static_cast<float>(s.rect_px.size().y));
-            enqueue_event(e);
+            e.width_px = ui::px(static_cast<float>(s.rect_px.size().x()));
+            e.height_px = ui::px(static_cast<float>(s.rect_px.size().y()));
+            dispatch_event(e);
 
             window_moved_event m;
             m.window = id;
             m.position_px = s.position_px;
-            enqueue_event(m);
+            dispatch_event(m);
 
             window_dpi_changed_event dpi;
             dpi.window = id;
             dpi.dpi_scale = s.dpi_scale;
-            enqueue_event(dpi);
+            dispatch_event(dpi);
         }
 
         /** @brief Publishes a display state transition, if it is one. */
@@ -150,29 +120,29 @@ namespace catalyst::platform::detail
             window_display_state_event e;
             e.window = s.id;
             e.state = state;
-            enqueue_event(e);
+            dispatch_event(e);
         }
 
         /** @brief Resizes a window's client area and publishes the resize, honouring any size limits. */
         void resize_client(window_state &s, math::vec2<std::int32_t> size_px)
         {
-            if (s.min_size_px.x > 0)
-                size_px.x = std::max(size_px.x, s.min_size_px.x);
-            if (s.min_size_px.y > 0)
-                size_px.y = std::max(size_px.y, s.min_size_px.y);
-            if (s.max_size_px.x > 0)
-                size_px.x = std::min(size_px.x, s.max_size_px.x);
-            if (s.max_size_px.y > 0)
-                size_px.y = std::min(size_px.y, s.max_size_px.y);
+            if (s.min_size_px.x() > 0)
+                size_px.x() = std::max(size_px.x(), s.min_size_px.x());
+            if (s.min_size_px.y() > 0)
+                size_px.y() = std::max(size_px.y(), s.min_size_px.y());
+            if (s.max_size_px.x() > 0)
+                size_px.x() = std::min(size_px.x(), s.max_size_px.x());
+            if (s.max_size_px.y() > 0)
+                size_px.y() = std::min(size_px.y(), s.max_size_px.y());
 
             s.rect_px.min = {0, 0};
             s.rect_px.max = size_px;
 
             window_resized_event e;
             e.window = s.id;
-            e.width_px = ui::px(static_cast<float>(size_px.x));
-            e.height_px = ui::px(static_cast<float>(size_px.y));
-            enqueue_event(e);
+            e.width_px = ui::px(static_cast<float>(size_px.x()));
+            e.height_px = ui::px(static_cast<float>(size_px.y()));
+            dispatch_event(e);
         }
     } // namespace
 
@@ -190,7 +160,7 @@ namespace catalyst::platform::detail
                          resolve_px(desc.height_px, ui::axis::y, s.dpi_scale)};
 
         g_windows.emplace(id, s);
-        enqueue_created_events(id, s);
+        dispatch_created_events(id, s);
         return id;
     }
 
@@ -204,7 +174,7 @@ namespace catalyst::platform::detail
 
         window_destroyed_event e;
         e.window = id;
-        enqueue_event(e);
+        dispatch_event(e);
     }
 
     bool is_window_valid(window_id id) noexcept
@@ -217,10 +187,10 @@ namespace catalyst::platform::detail
         return {};
     }
 
-    catalyst::math::rect<std::int32_t> client_rect_px(window_id id) noexcept
+    rect_px client_rect_px(window_id id) noexcept
     {
         const window_state *s = state_from_id(id);
-        return s ? s->rect_px : catalyst::math::rect<std::int32_t>{{0, 0}, {0, 0}};
+        return s ? s->rect_px : rect_px{};
     }
 
     float dpi_scale(window_id id) noexcept
@@ -236,37 +206,34 @@ namespace catalyst::platform::detail
 
     bool wait_events(std::uint32_t timeout_ms) noexcept
     {
-        // The queue does the blocking, so a headless wait costs nothing while it is idle and returns the instant another
-        // thread publishes, instead of sleeping in fixed steps and waking up to find out.
-        if (timeout_ms == 0xFFFFFFFFu)
-            return g_events.wait_for_events();
+        // There is no OS to wake this backend up: a headless window only ever changes because the application itself
+        // called into this module, on this thread, which it cannot do while blocked here. So no wait can produce an event,
+        // and this reports that rather than pretending otherwise. A finite timeout still elapses, so a loop that paces
+        // itself with wait_events() keeps its timing headless; an infinite one returns at once instead of deadlocking.
+        if (timeout_ms != 0xFFFFFFFFu && timeout_ms != 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
 
-        return g_events.wait_for_events(std::chrono::milliseconds(timeout_ms));
+        return false;
     }
 
-    bool poll_event(std::unique_ptr<core::event_base> &out) noexcept
+    void set_event_bus(events::bus *bus) noexcept
     {
-        return g_events.try_pop(out);
+        g_bus = bus;
     }
 
-    void set_event_sink(core::event_sink *sink) noexcept
+    events::bus *event_bus() noexcept
     {
-        g_event_sink = sink;
+        return g_bus;
     }
 
-    void set_event_queue_capacity(std::size_t max_events) noexcept
+    void set_input_feed(input::event_feed *feed) noexcept
     {
-        g_events.set_capacity(max_events);
+        g_feed = feed;
     }
 
-    std::size_t event_queue_capacity() noexcept
+    input::event_feed *input_feed() noexcept
     {
-        return g_events.capacity();
-    }
-
-    std::size_t dropped_event_count() noexcept
-    {
-        return g_events.dropped_count();
+        return g_feed;
     }
 
     void set_cursor_mode(window_id id, cursor_mode mode) noexcept
@@ -313,7 +280,7 @@ namespace catalyst::platform::detail
     void set_position(window_id id, const math::vec2<std::int32_t> &position_px) noexcept
     {
         window_state *s = state_from_id(id);
-        if (!s || (s->position_px.x == position_px.x && s->position_px.y == position_px.y))
+        if (!s || (s->position_px.x() == position_px.x() && s->position_px.y() == position_px.y()))
             return;
 
         s->position_px = position_px;
@@ -321,7 +288,7 @@ namespace catalyst::platform::detail
         window_moved_event e;
         e.window = id;
         e.position_px = position_px;
-        enqueue_event(e);
+        dispatch_event(e);
     }
 
     math::vec2<std::int32_t> position_px(window_id id) noexcept
@@ -336,8 +303,8 @@ namespace catalyst::platform::detail
         if (!s)
             return;
 
-        s->min_size_px = {std::max(0, min_px.x), std::max(0, min_px.y)};
-        s->max_size_px = {std::max(0, max_px.x), std::max(0, max_px.y)};
+        s->min_size_px = {std::max(0, min_px.x()), std::max(0, min_px.y())};
+        s->max_size_px = {std::max(0, max_px.x()), std::max(0, max_px.y())};
 
         resize_client(*s, s->rect_px.size());
     }
@@ -383,7 +350,7 @@ namespace catalyst::platform::detail
         window_focus_event e;
         e.window = id;
         e.focused = true;
-        enqueue_event(e);
+        dispatch_event(e);
     }
 
     void request_attention(window_id /*id*/) noexcept

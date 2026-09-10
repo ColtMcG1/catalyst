@@ -1,4 +1,4 @@
-#include "../core/test_common.hpp"
+#include "../test_common.hpp"
 
 #include <catalyst/resource/json/json.hpp>
 

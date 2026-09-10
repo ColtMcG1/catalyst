@@ -8,13 +8,12 @@
 #pragma once
 
 #include <catalyst/input/input.hpp>
-#include <catalyst/core/event.hpp>
-#include <catalyst/math/rect.hpp>
+#include <catalyst/math/vector.hpp>
+#include <catalyst/platform/platform.hpp>
 #include <catalyst/ui/measurement.hpp>
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 
 using namespace catalyst::ui::literals;
 
@@ -23,9 +22,14 @@ using namespace catalyst::ui::literals;
  * @brief The catalyst::platform namespace contains all the platform-specific types and functions provided by the Catalyst Platform library. This includes window management, event handling, and other platform-related utilities. By organizing all platform-specific functionality within this namespace, we can avoid naming conflicts and provide a clear structure for users of the library to access the various platform tools they need for their applications. The Catalyst Platform library is designed to be efficient, easy to use, and compatible with modern C++ standards, making it a valuable resource for developers building real-time applications and games.
  * @details The Catalyst Platform library provides a collection of platform utilities and types commonly used in game development and real-time applications. By including the appropriate headers from the Catalyst Platform library, users can access all the functionality they need for their projects, such as creating windows, handling events, and interacting with the underlying operating system in a platform-agnostic way. This allows developers to focus on building their applications without worrying about the complexities of platform-specific code, while still having access to powerful tools for managing windows and events effectively.
  */
-namespace catalyst::core
+namespace catalyst::events
 {
-    class event_sink; // Forward declaration of event_sink to avoid circular dependency with platform events.
+    class bus; // Forward declared so this header does not pull the event bus into every consumer of a window.
+}
+
+namespace catalyst::input
+{
+    class event_feed; // Forward declared: the platform pushes window-sourced input through this, nothing more.
 }
 
 /*
@@ -112,16 +116,19 @@ namespace catalyst::platform
     };
 
     // -----------------------------------------------------------------------------
-    // Strongly-typed events (catalyst::core event system)
+    // Window events
     // -----------------------------------------------------------------------------
+    //
+    // Plain structs: the event bus keys on the static type, so an event needs no base class and no runtime type id. They
+    // are dispatched to the bus installed with set_event_bus(). Input events are *not* here - those go to the
+    // input::event_feed installed with set_input_feed(), and reach the bus from the input module's registry.
 
     /**
      * @struct window_close_requested_event
      * @brief An event that is published when a window close request is made. This event is typically generated when the user attempts to close a window, such as by clicking the close button on the title bar or using a keyboard shortcut. The event contains a window_id member that identifies which window is being requested to close. Handlers for this event can choose to allow the window to close by not marking the event as handled, or they can prevent the window from closing by marking the event as handled, allowing for custom behavior such as prompting the user to save changes before closing.
      * @details The window_close_requested_event is an important part of the Catalyst Platform library's event system, as it allows developers to respond to user-initiated close requests in a flexible manner. By subscribing to this event, developers can implement custom logic to determine whether a window should be allowed to close, such as checking for unsaved data or confirming the user's intent. This enhances the user experience by providing a way to prevent accidental closures and ensuring that important data is not lost without warning.
-     * @implements core::event<window_close_requested_event>
      */
-    struct window_close_requested_event : public core::event<window_close_requested_event>
+    struct window_close_requested_event
     {
         window_id window = 0;
     };
@@ -130,9 +137,8 @@ namespace catalyst::platform
      * @struct window_destroyed_event
      * @brief An event that is published when a window has been destroyed. This event is typically generated after a window has been closed and all associated resources have been released. The event contains a window_id member that identifies which window was destroyed. Handlers for this event can perform any necessary cleanup or updates in response to the destruction of the window, such as removing references to the window or updating the user interface to reflect the change.
      * @details The window_destroyed_event is an important part of the Catalyst Platform library's event system, as it allows developers to respond to the destruction of windows in a timely manner. By subscribing to this event, developers can ensure that their applications remain stable and responsive by properly handling the cleanup of resources and updating the application state when windows are destroyed.
-     * @implements core::event<window_destroyed_event>
      */
-    struct window_destroyed_event : public core::event<window_destroyed_event>
+    struct window_destroyed_event
     {
         window_id window = 0;
     };
@@ -141,9 +147,8 @@ namespace catalyst::platform
      * @struct window_resized_event
      * @brief An event that is published when a window has been resized. This event is typically generated when the user resizes a window by dragging its edges or corners, or when the window is programmatically resized through the Catalyst Platform library. The event contains a window_id member that identifies which window was resized, as well as width_px and height_px members that specify the new dimensions of the window in pixels. Handlers for this event can use this information to adjust the layout of the user interface, resize rendering targets, or perform other necessary updates in response to the change in window size.
      * @details The window_resized_event is an important part of the Catalyst Platform library's event system, as it allows developers to respond to changes in window size in a timely manner. By subscribing to this event, developers can ensure that their applications remain visually consistent and functional when windows are resized, providing a better user experience across different screen sizes and resolutions.
-     * @implements core::event<window_resized_event>
      */
-    struct window_resized_event : public core::event<window_resized_event>
+    struct window_resized_event
     {
         window_id window = 0;
         ui::length width_px = 0.0_px;
@@ -154,9 +159,8 @@ namespace catalyst::platform
      * @struct window_enter_size_move_event
      * @brief An event that is published when a window enters a size or move operation. This event is typically generated when the user begins resizing or moving a window, such as by clicking and dragging the edges or title bar. The event contains a window_id member that identifies which window is entering the size or move operation. Handlers for this event can use this information to prepare for potential changes in the window's position or size, such as pausing certain updates or adjusting the user interface to accommodate the ongoing operation.
      * @details The window_enter_size_move_event is an important part of the Catalyst Platform library's event system, as it allows developers to respond to user-initiated size and move operations in a flexible manner. By subscribing to this event, developers can implement custom logic to enhance the user experience during these operations, such as providing visual feedback or temporarily adjusting application behavior while the user is resizing or moving a window.
-     * @implements core::event<window_enter_size_move_event>
      */
-    struct window_enter_size_move_event : public core::event<window_enter_size_move_event>
+    struct window_enter_size_move_event
     {
         window_id window = 0;
     };
@@ -165,9 +169,8 @@ namespace catalyst::platform
      * @struct window_exit_size_move_event
      * @brief An event that is published when a window exits a size or move operation. This event is typically generated when the user finishes resizing or moving a window, such as by releasing the mouse button after dragging the edges or title bar. The event contains a window_id member that identifies which window is exiting the size or move operation. Handlers for this event can use this information to finalize any updates or adjustments that were made during the size or move operation, such as resuming paused updates or applying final layout changes based on the new position or size of the window.
      * @details The window_exit_size_move_event is an important part of the Catalyst Platform library's event system, as it allows developers to respond to the completion of user-initiated size and move operations in a timely manner. By subscribing to this event, developers can ensure that their applications remain responsive and visually consistent after these operations, providing a better user experience across different screen sizes and resolutions.
-     * @implements core::event<window_exit_size_move_event>
      */
-    struct window_exit_size_move_event : public core::event<window_exit_size_move_event>
+    struct window_exit_size_move_event
     {
         window_id window = 0;
     };
@@ -176,9 +179,8 @@ namespace catalyst::platform
      * @struct window_dpi_changed_event
      * @brief An event that is published when the DPI scaling factor for a window has changed. This event is typically generated when a window is moved to a different display with a different DPI scaling factor, or when the system's DPI settings are changed while the application is running. The event contains a window_id member that identifies which window's DPI scaling factor has changed, as well as a dpi_scale member that specifies the new DPI scaling factor for the window. Handlers for this event can use this information to adjust rendering and layout calculations to account for the new display density, ensuring that content appears at an appropriate size on high-DPI displays.
      * @details The window_dpi_changed_event is an important part of the Catalyst Platform library's event system, as it allows developers to respond to changes in DPI scaling in a timely manner. By subscribing to this event, developers can ensure that their applications remain visually consistent and functional across different display densities, providing a better user experience on high-DPI displays.
-     * @implements core::event<window_dpi_changed_event>
      */
-    struct window_dpi_changed_event : public core::event<window_dpi_changed_event>
+    struct window_dpi_changed_event
     {
         window_id window = 0;
         float dpi_scale = 1.0f;
@@ -190,7 +192,7 @@ namespace catalyst::platform
      * every key and mouse button it still considers held, so consumers never see stuck input, and any cursor capture is
      * suspended until focus returns.
      */
-    struct window_focus_event : public core::event<window_focus_event>
+    struct window_focus_event
     {
         window_id window = 0;
         bool focused = false;
@@ -202,7 +204,7 @@ namespace catalyst::platform
      * corner of the *client* area in screen pixels, which is what an application needs to map between client and screen
      * space; it is not the top-left of the window frame.
      */
-    struct window_moved_event : public core::event<window_moved_event>
+    struct window_moved_event
     {
         window_id window = 0;
         math::vec2<std::int32_t> position_px{};
@@ -228,7 +230,7 @@ namespace catalyst::platform
      * the state from a 0x0 window_resized_event: a minimised window still receives resize events, and presenting to a
      * zero-sized surface is an error on every graphics API.
      */
-    struct window_display_state_event : public core::event<window_display_state_event>
+    struct window_display_state_event
     {
         window_id window = 0;
         window_display_state state = window_display_state::restored;
@@ -339,11 +341,11 @@ namespace catalyst::platform
     [[nodiscard]] native_handle get_native_handle(const window &w) noexcept;
     /**
      * @fn client_rect_px
-     * @brief Retrieves the client area rectangle of the specified window in pixels. This function takes a reference to a window instance and returns a math::rect structure that defines the dimensions of the client area of the window in pixels. The client area is the portion of the window where content can be rendered, excluding any non-client areas such as title bars, borders, and scroll bars. If the provided window instance is invalid (i.e., it does not reference a valid window), the function will return an empty rectangle with all dimensions set to zero.
+     * @brief Retrieves the client area rectangle of the specified window in pixels. This function takes a reference to a window instance and returns a rect_px that defines the dimensions of the client area of the window in pixels. The client area is the portion of the window where content can be rendered, excluding any non-client areas such as title bars, borders, and scroll bars. If the provided window instance is invalid (i.e., it does not reference a valid window), the function will return an empty rectangle with all dimensions set to zero.
      * @param w A reference to a window instance for which the client area rectangle will be retrieved. This instance should be valid (i.e., it should reference a valid window) for the function to successfully retrieve the client area rectangle.
-     * @return A math::rect structure defining the dimensions of the client area of the specified window in pixels. If the provided window instance is invalid, an empty rectangle with all dimensions set to zero will be returned.
+     * @return A rect_px defining the dimensions of the client area of the specified window in pixels. If the provided window instance is invalid, an empty rectangle with all dimensions set to zero will be returned.
      */
-    [[nodiscard]] math::rect<std::int32_t> client_rect_px(const window &w) noexcept;
+    [[nodiscard]] rect_px client_rect_px(const window &w) noexcept;
     /**
      * @fn dpi_scale
      * @brief Retrieves the current DPI scaling factor for the specified window. This function takes a reference to a window instance and returns a float value representing the DPI scaling factor for that window. The DPI scaling factor indicates how much the content of the window should be scaled to appear at an appropriate size on high-DPI displays. A value of 1.0f indicates no scaling (i.e., 100% scale), while values greater than 1.0f indicate that content should be scaled up, and values less than 1.0f indicate that content should be scaled down. If the provided window instance is invalid (i.e., it does not reference a valid window), the function will return a default DPI scaling factor of 1.0f.
@@ -376,19 +378,41 @@ namespace catalyst::platform
     [[nodiscard]] bool wait_events(std::uint32_t timeout_ms = 0xFFFFFFFFu) noexcept;
 
     /**
-     * @fn poll_event
-     * @brief Retrieves the next event queued by the backend, if any. Events are queued only while no event sink is installed (see set_event_sink); once a sink is set, events are published to it immediately and this function always returns false. Use one mechanism or the other, not both.
-     * @param out A reference to a unique_ptr that will be set to point to the retrieved event if one is available. If no events are available, this pointer will remain unchanged.
-     * @return True if an event was successfully retrieved and processed, false if there are no more events available at the moment.
+     * @fn set_event_bus
+     * @brief Installs the bus that window events are dispatched to, synchronously from pump_events()/wait_events() on the
+     * calling thread. Pass nullptr to stop dispatching them.
+     * @details Only the window and monitor events declared in this module and in monitor.hpp go here. Input events go to
+     * the feed installed with set_input_feed, so that every input event reaches a bus from the input module's registry
+     * rather than from two places that can disagree about what is held down.
+     *
+     * With no bus installed the backend still translates and processes messages - a window stays responsive, resizes and
+     * reports its state correctly - it simply dispatches nothing. Events are not retained for a bus installed later: there
+     * is no queue behind this, because the one case that needed it (the OS holding the thread in a modal size/move loop)
+     * is served by the frame callback instead. See set_frame_callback.
+     * @param bus The bus to dispatch window events to, or nullptr for none. It must outlive the installation, or be
+     * replaced before it is destroyed.
      */
-    [[nodiscard]] bool poll_event(std::unique_ptr<core::event_base> &out) noexcept;
+    void set_event_bus(events::bus *bus) noexcept;
+
+    /** @brief The bus installed with set_event_bus, or nullptr if none is installed. */
+    [[nodiscard]] events::bus *event_bus() noexcept;
 
     /**
-     * @fn set_event_sink
-     * @brief Installs the event sink that receives every window and input event the backend generates, published synchronously from pump_events()/wait_events() on the calling thread. While a sink is installed nothing is queued for poll_event(). Pass nullptr to go back to polling. The sink (and its dispatcher) must outlive the installation.
-     * @param sink A pointer to an instance of a class that implements the core::event_sink interface. This instance will receive events published by the Catalyst Platform library, allowing developers to integrate those events into their own event handling systems or frameworks.
+     * @fn set_input_feed
+     * @brief Installs the feed that window-sourced input - keyboard, text, mouse, touch and pen - is delivered to,
+     * synchronously from pump_events()/wait_events() on the calling thread. Pass nullptr to stop delivering it.
+     * @details Keyboards and mice belong to a window, so their events arrive on the platform's message loop rather than
+     * from a device the input module polls. This hands them straight to input::context (which implements event_feed), whose
+     * registry owns the device state and publishes the events onward. The platform's job is translation only: it does not
+     * track what is held, and on focus loss it calls feed_focus_lost and lets the registry synthesise the releases for
+     * everything that window still holds.
+     * @param feed The feed to deliver input to, or nullptr for none. It must outlive the installation, or be replaced
+     * before it is destroyed.
      */
-    void set_event_sink(core::event_sink *sink) noexcept;
+    void set_input_feed(input::event_feed *feed) noexcept;
+
+    /** @brief The feed installed with set_input_feed, or nullptr if none is installed. */
+    [[nodiscard]] input::event_feed *input_feed() noexcept;
 
     /**
      * @fn set_cursor_mode
@@ -424,37 +448,6 @@ namespace catalyst::platform
      * @param user An opaque pointer passed back to @p cb unchanged. The backend does not own or inspect it.
      */
     void set_frame_callback(const window &w, frame_callback cb, void *user) noexcept;
-
-    // -----------------------------------------------------------------------------
-    // Queued-event bounds (poll_event path only)
-    // -----------------------------------------------------------------------------
-
-    /**
-     * @fn set_event_queue_capacity
-     * @brief Sets the maximum number of events poll_event() will hold before it starts discarding the oldest ones.
-     * @details This bounds the queue that poll_event() drains; it has no effect while an event sink is installed, because a
-     * sink is published to synchronously and nothing is ever queued. The bound matters because the operating system can
-     * hold the thread inside its own message pump for an unbounded amount of time (a resize drag, a menu, a modal dialog),
-     * during which the backend keeps producing events that the application has no opportunity to drain. Without a bound
-     * that is an unbounded allocation, and the stale events it accumulates are of no use once the drag ends anyway.
-     *
-     * When the queue is full the *oldest* event is discarded and dropped_event_count() is incremented, so what survives is
-     * the most recent state rather than a stale prefix. Position and size events additionally coalesce with an immediately
-     * preceding event of the same type for the same window, since only the latest value of either is meaningful; this keeps
-     * a pixel-by-pixel resize drag from consuming the whole queue on its own.
-     * @param max_events The capacity, or 0 for an unbounded queue (the pre-existing behaviour). The default is 4096.
-     */
-    void set_event_queue_capacity(std::size_t max_events) noexcept;
-
-    /** @brief The capacity set with set_event_queue_capacity, or 0 if the queue is unbounded. */
-    [[nodiscard]] std::size_t event_queue_capacity() noexcept;
-
-    /**
-     * @brief How many events have been discarded because the queue was full, since process start. A non-zero and growing
-     * value means the application is not draining poll_event() often enough, or the capacity is too small for its frame
-     * time.
-     */
-    [[nodiscard]] std::size_t dropped_event_count() noexcept;
 
     // -----------------------------------------------------------------------------
     // Window state

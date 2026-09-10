@@ -7,10 +7,8 @@
 
 #pragma once
 
-#include <catalyst/math/rect.hpp>
-#include <catalyst/math/vec.hpp>
+#include <catalyst/math/vector.hpp>
 #include <catalyst/platform/platform.hpp>
-#include <catalyst/core/event.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -58,21 +56,21 @@ namespace catalyst::platform
          * @details This rectangle includes both position (min) and extent (max). For multi-monitor setups,
          * this is typically relative to a common origin (often the primary monitor).
          */
-        math::rect<std::int32_t> bounds_px{};
+        rect_px bounds_px{};
 
         /**
          * @var work_area_px
          * @brief The usable work area rectangle in pixels.
          * @details This typically excludes OS UI such as the taskbar/dock/menu bar.
          */
-        math::rect<std::int32_t> work_area_px{};
+        rect_px work_area_px{};
 
         /**
          * @var size_mm
          * @brief The physical size of the monitor in millimeters.
          * @details May be {0,0} if unknown.
          */
-        math::vec<float, 2> size_mm{};
+        math::vec2<float> size_mm{};
 
         /**
          * @var dpi_x
@@ -105,7 +103,7 @@ namespace catalyst::platform
      * @struct monitor_connected_event
      * @brief An event that is generated when a monitor is connected to the system. This event contains a monitor_desc structure that describes the properties of the newly connected monitor, allowing applications to respond to the new display environment effectively.
      */
-    struct monitor_connected_event : core::event<monitor_connected_event>
+    struct monitor_connected_event
     {
         monitor_desc desc;
     };
@@ -114,7 +112,7 @@ namespace catalyst::platform
      * @struct monitor_disconnected_event
      * @brief An event that is generated when a monitor is disconnected from the system. This event contains a monitor_desc structure that describes the properties of the disconnected monitor, allowing applications to respond to the change in the display environment effectively.
      */
-    struct monitor_disconnected_event : core::event<monitor_disconnected_event>
+    struct monitor_disconnected_event
     {
         monitor_desc desc;
     };
@@ -123,7 +121,7 @@ namespace catalyst::platform
      * @struct monitor_changed_event
      * @brief An event that is generated when a monitor's properties are changed (e.g. resolution change, position change). This event contains a monitor_desc structure that describes the new properties of the monitor, allowing applications to respond to changes in the display environment effectively.
      */
-    struct monitor_changed_event : core::event<monitor_changed_event>
+    struct monitor_changed_event
     {
         monitor_desc desc;
     };

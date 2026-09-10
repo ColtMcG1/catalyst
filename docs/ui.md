@@ -73,7 +73,7 @@ relayout. Dirty flags are already tracked, they are just not yet used to skip su
 
 - `ui/hit_test.hpp`: point → deepest hit node, honoring clip and `overflow`.
 - `ui/event.hpp`: pointer enter/leave/down/up/click/drag, wheel/scroll, key and text events,
-  built on `catalyst::core::event` so they flow through the existing dispatcher.
+  dispatched to a `catalyst::events::bus`, like every other event in the engine.
 - Capture, focus tree and tab order; bridge from `catalyst::input` events.
 
 ### Tier 4 — Text

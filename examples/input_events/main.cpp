@@ -5,10 +5,6 @@
  * input at once: listening for typed events on the bus (the console echo), polling `input_state` (the hot keys), and
  * polling actions (movement and the camera). Tab toggles cursor capture, which switches the window to raw mouse motion;
  * H toggles a hidden cursor; Space rumbles the first gamepad; Escape quits.
- *
- * NOTE: this example needs `platform::set_input_feed()`, which arrives with the platform module's own port to
- * `catalyst::events::bus` - see the "What is left" section of docs/input.md. `examples/input_actions` is the headless
- * equivalent and builds today.
  * License: CDDL-1.0 (see LICENSE).
  */
 
@@ -123,6 +119,7 @@ int main()
     events::bus bus;
     input::context in(bus);
     platform::set_input_feed(&in);
+    platform::set_event_bus(&bus); // window events (close, focus) come straight from the platform
 
     // Actions: what the player can do, rather than which keys are down.
     input::action_map &play = in.actions().add_map("gameplay");
@@ -244,6 +241,7 @@ int main()
         std::this_thread::sleep_for(8ms);
     }
 
+    platform::set_event_bus(nullptr);
     platform::set_input_feed(nullptr);
     platform::destroy_window(w);
     return 0;

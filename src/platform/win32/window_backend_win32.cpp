@@ -8,8 +8,8 @@
 
 #include "../detail_backend.hpp"
 
-#include <catalyst/core/event_queue.hpp>
-#include <catalyst/core/event_sink.hpp>
+#include <catalyst/events/bus.hpp>
+#include <catalyst/input/feed.hpp>
 #include <catalyst/input/keyboard.hpp>
 #include <catalyst/input/mouse.hpp>
 
@@ -22,7 +22,6 @@
 #include <win32/module.hpp>
 
 #include <algorithm>
-#include <bitset>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -59,12 +58,6 @@ namespace catalyst::platform::detail
          * when the user is holding the border still (a stationary drag produces no WM_SIZE and no WM_PAINT at all).
          */
         constexpr UINT_PTR k_size_move_timer_id = 1;
-
-        /**
-         * @var k_default_event_queue_capacity
-         * @brief Default bound on the poll_event() queue. See platform::set_event_queue_capacity for why a bound is needed.
-         */
-        constexpr std::size_t k_default_event_queue_capacity = 4096;
 
         /**
          * @var k_dwmwa_use_immersive_dark_mode
@@ -104,18 +97,13 @@ namespace catalyst::platform::detail
             wchar_t pending_high_surrogate = 0;
 
             /**
-             * @var keys_down
-             * @brief USB HID usage ids of the keys this window currently considers held. Used to publish releases when the
-             * window loses focus, so applications never see a key stuck down after Alt+Tab. Per window rather than per
-             * process: two windows have independent key state as far as the application is concerned, and a focus change
-             * on one must not fabricate releases for the other.
-             */
-            std::bitset<input::key_code_count> keys_down;
-
-            /**
              * @var buttons_down
              * @brief The mouse buttons currently held over this window, mirrored from the button messages. The mouse is
              * captured while this is non-empty so drags keep reporting after the cursor leaves the window.
+             * @note This exists for the capture lifecycle, which is the platform's own business, and not to synthesise
+             * releases on focus loss - the input registry does that from the state it already owns (see
+             * input::event_feed::feed_focus_lost). The keys this window held used to be tracked here for exactly that
+             * reason; they are not any more.
              */
             input::mouse_buttons buttons_down = input::mouse_buttons::none;
             bool holds_capture = false; ///< this window called SetCapture and has not released it yet
@@ -156,22 +144,19 @@ namespace catalyst::platform::detail
         std::uint64_t g_next_window_id = 1;
 
         /**
-         * @var g_events
-         * @brief Events waiting to be drained by poll_event(). Only populated while no event sink is installed.
-         * @details The bound, the drop-oldest policy behind it and the coalescing of same-slot events all live in
-         * core::event_queue, so this backend only has to decide *which* events are coalescible (see enqueue_event) and let
-         * the queue do the rest. The queue is also thread-safe, which the backend does not need for itself - every event is
-         * produced on the thread that owns the message pump - but which does mean an application is free to drain
-         * poll_event() from a thread other than the one that pumps.
+         * @var g_bus
+         * @brief The bus window events are dispatched to, or nullptr when nobody is listening. See dispatch_event.
          */
-        core::event_queue g_events{k_default_event_queue_capacity};
+        events::bus *g_bus = nullptr;
 
         /**
-         * @var g_event_sink
-         * @brief The sink events are published to, or nullptr when the application drains poll_event() instead. Exactly one
-         * of the two paths is ever used; see enqueue_event.
+         * @var g_feed
+         * @brief The feed window-sourced input is delivered to, or nullptr when nobody is listening.
+         * @details Input does not go to the bus from here. It goes to the input module, which owns the device state and
+         * publishes the events onward, so that what this backend reports and what the input module believes is held can
+         * never disagree - they are the same state.
          */
-        core::event_sink *g_event_sink = nullptr;
+        input::event_feed *g_feed = nullptr;
 
         /**
          * @var g_raw_mouse_window
@@ -304,7 +289,7 @@ namespace catalyst::platform::detail
         /** @brief The outer window size needed to give @p hwnd a client area of @p client_px pixels. */
         math::vec2<std::int32_t> window_size_for_client(HWND hwnd, const math::vec2<std::int32_t> &client_px) noexcept
         {
-            RECT r{0, 0, static_cast<LONG>(client_px.x), static_cast<LONG>(client_px.y)};
+            RECT r{0, 0, static_cast<LONG>(client_px.x()), static_cast<LONG>(client_px.y())};
             adjust_rect_for_window(hwnd, r);
             return {static_cast<std::int32_t>(r.right - r.left), static_cast<std::int32_t>(r.bottom - r.top)};
         }
@@ -314,59 +299,23 @@ namespace catalyst::platform::detail
         // -------------------------------------------------------------------------------------------------------------
 
         /**
-         * @struct coalescing_event
-         * @brief Marks the event types whose queued instances may be replaced by a newer one for the same window.
-         * @details Only the latest position and the latest size of a window carry information; every intermediate value
-         * produced while the user drags a border is dead on arrival. A resize drag emits one of each per pixel of mouse
-         * travel, all of it while the modal size/move loop denies the application any chance to drain the queue, so without
-         * this a single drag can be the entire contents of a bounded queue. No other event type is safe to collapse: input
-         * events are meaningful individually and their order relative to one another is load-bearing.
-         * @note This is only the policy - which of *this backend's* event types may be collapsed. The mechanism is
-         * core::event_queue's, driven by the coalesce key enqueue_event stamps on the event.
+         * @fn dispatch_event
+         * @brief Dispatches one window event to the installed bus, or drops it if there is none.
+         * @details The event is taken by value and dispatched from that value, so this allocates nothing: the bus keys on
+         * the static event type, which needs neither a runtime type id nor a heap-allocated base pointer.
+         *
+         * Nothing is retained when no bus is installed. That used to matter, because the operating system can hold this
+         * thread inside its own modal size/move loop for the whole of a border drag, and a bounded queue with a
+         * coalescing policy for resizes and moves was what kept that drag from either freezing the window or growing
+         * without limit. The frame callback solves that problem properly - it hands control back mid-loop so the
+         * application can render the current size rather than catch up on a queue of stale ones afterwards - so the
+         * queue, its bound and its coalescing are all gone. See set_frame_callback.
          */
         template <typename E>
-        struct coalescing_event : std::false_type
+        void dispatch_event(E e)
         {
-        };
-        template <>
-        struct coalescing_event<window_resized_event> : std::true_type
-        {
-        };
-        template <>
-        struct coalescing_event<window_moved_event> : std::true_type
-        {
-        };
-
-        /**
-         * @fn enqueue_event
-         * @brief Timestamps an event and delivers it through exactly one path: published to the event sink if one is
-         * installed, otherwise queued for poll_event(). Doing both would deliver every event twice to applications that use
-         * both APIs, and leak the queue in applications that use only the sink.
-         * @details The event is taken by value and published from that value directly, so the sink path performs no
-         * allocation at all. This matters because it is the hot path: a captured mouse at a 1000 Hz polling rate produces
-         * thousands of events per second, and the previous shape of this function allocated and immediately freed a
-         * unique_ptr for each of them. Passing the concrete type also selects event_sink's templated publish overload,
-         * which dispatches on the static type instead of the runtime type id.
-         */
-        template <typename E>
-        void enqueue_event(E e)
-        {
-            e.stamp();
-
-            if (g_event_sink)
-            {
-                g_event_sink->publish(e);
-                return;
-            }
-
-            if constexpr (coalescing_event<E>::value)
-            {
-                // Window ids start at 1, so a window id is never core::no_coalescing. Keying on the window is what stops
-                // one window's resizes swallowing another's.
-                e.set_coalesce_key(static_cast<core::coalesce_key>(e.window));
-            }
-
-            g_events.push(std::make_unique<E>(std::move(e)));
+            if (g_bus)
+                g_bus->dispatch(std::move(e));
         }
 
         /**
@@ -815,17 +764,23 @@ namespace catalyst::platform::detail
         }
 
         /**
-         * @fn release_held_mouse_buttons
-         * @brief Publishes a release for every mouse button the backend thinks is held and drops the capture. Used when the
-         * capture is taken away (WM_CAPTURECHANGED) or the window loses focus, so no button is left stuck down.
+         * @fn release_captured_buttons
+         * @brief Feeds a release for every mouse button this window holds the capture for, and drops the capture.
+         * @details Used when the capture is taken away by another window (WM_CAPTURECHANGED): the matching button-up
+         * messages will be delivered to whoever took it, not to us, so they have to be produced here or the buttons stay
+         * down forever.
+         * @note This reads the backend's own buttons_down rather than asking the input module, because what is being undone
+         * is the capture this backend took - a platform concern, tracked for the capture's sake either way. Focus loss is
+         * different and does not come through here: it releases the *device* state, keys included, which the registry
+         * knows better than this backend ever could. See feed_focus_lost at WM_KILLFOCUS.
          */
-        void release_held_mouse_buttons(window_state &ws) noexcept
+        void release_captured_buttons(window_state &ws) noexcept
         {
             const input::mouse_buttons held = ws.buttons_down;
             ws.buttons_down = input::mouse_buttons::none;
             ws.holds_capture = false;
 
-            if (held == input::mouse_buttons::none)
+            if (held == input::mouse_buttons::none || !g_feed)
                 return;
 
             const input::key_modifiers mods = current_modifiers();
@@ -838,52 +793,26 @@ namespace catalyst::platform::detail
                 input::mouse_button_event be;
                 be.window = ws.id;
                 be.button = b;
-                be.action = input::mouse_button_action::release;
+                be.action = input::button_action::release;
                 be.position_px = ws.last_mouse_pos_px;
                 be.modifiers = mods;
-                enqueue_event(be);
+                g_feed->feed_mouse_button(be);
             }
         }
 
         /**
-         * @fn release_held_keys
-         * @brief Publishes a release for every key the backend thinks is held. Used on focus loss: Windows delivers the
-         * WM_KEYUP for keys released after Alt+Tab to the newly focused application, not to us.
+         * @fn feed_text
+         * @brief Feeds one code point as a text_input_event, unless it is a control character.
          */
-        void release_held_keys(window_state &ws) noexcept
+        void feed_text(window_id id, input::character_code cp) noexcept
         {
-            if (ws.keys_down.none())
-                return;
-
-            for (std::size_t i = 1; i < input::key_code_count; ++i)
-            {
-                if (!ws.keys_down.test(i))
-                    continue;
-
-                input::key_event ke;
-                ke.window = ws.id;
-                ke.code = static_cast<input::key_code>(i);
-                ke.scancode = 0;
-                ke.action = input::key_action::release;
-                ke.modifiers = input::key_modifiers::none;
-                enqueue_event(ke);
-            }
-            ws.keys_down.reset();
-        }
-
-        /**
-         * @fn publish_text
-         * @brief Publishes one code point as a text_input_event, unless it is a control character.
-         */
-        void publish_text(window_id id, input::character_code cp) noexcept
-        {
-            if (cp == 0 || is_control_character(cp))
+            if (cp == 0 || is_control_character(cp) || !g_feed)
                 return;
 
             input::text_input_event te(cp);
             te.window = id;
             te.modifiers = current_modifiers();
-            enqueue_event(te);
+            g_feed->feed_text(te);
         }
 
         /** @brief Turns one raw mouse record into a mouse_raw_move_event, if it carries any motion. */
@@ -896,7 +825,7 @@ namespace catalyst::platform::detail
                 // Remote desktop / tablets report absolute positions; turn them into deltas ourselves.
                 const math::vec2<std::int32_t> abs{static_cast<std::int32_t>(m.lLastX), static_cast<std::int32_t>(m.lLastY)};
                 if (g_has_last_raw_absolute)
-                    delta = {abs.x - g_last_raw_absolute.x, abs.y - g_last_raw_absolute.y};
+                    delta = {abs.x() - g_last_raw_absolute.x(), abs.y() - g_last_raw_absolute.y()};
                 g_last_raw_absolute = abs;
                 g_has_last_raw_absolute = true;
             }
@@ -905,13 +834,13 @@ namespace catalyst::platform::detail
                 delta = {static_cast<std::int32_t>(m.lLastX), static_cast<std::int32_t>(m.lLastY)};
             }
 
-            if (delta.x == 0 && delta.y == 0)
+            if (delta.x() == 0 && delta.y() == 0)
                 return;
 
             input::mouse_raw_move_event re;
             re.window = ws.id;
             re.delta = delta;
-            enqueue_event(re);
+            g_feed->feed_mouse_raw_move(re);
         }
 
         /**
@@ -1003,7 +932,7 @@ namespace catalyst::platform::detail
                 {
                     window_close_requested_event we;
                     we.window = id;
-                    enqueue_event(we);
+                    dispatch_event(we);
                 }
                 return 0; // app decides when to destroy
             }
@@ -1013,7 +942,7 @@ namespace catalyst::platform::detail
                 {
                     window_destroyed_event we;
                     we.window = id;
-                    enqueue_event(we);
+                    dispatch_event(we);
                 }
                 return 0;
             }
@@ -1051,7 +980,7 @@ namespace catalyst::platform::detail
                         window_display_state_event de;
                         de.window = id;
                         de.state = state;
-                        enqueue_event(de);
+                        dispatch_event(de);
                     }
                 }
 
@@ -1061,7 +990,7 @@ namespace catalyst::platform::detail
                     we.window = id;
                     we.width_px = ui::px(static_cast<float>(LOWORD(lparam)));
                     we.height_px = ui::px(static_cast<float>(HIWORD(lparam)));
-                    enqueue_event(we);
+                    dispatch_event(we);
                 }
 
                 if (ws->cursor == cursor_mode::captured)
@@ -1084,7 +1013,7 @@ namespace catalyst::platform::detail
                     window_moved_event me;
                     me.window = id;
                     me.position_px = client_pos_from_lparam(lparam);
-                    enqueue_event(me);
+                    dispatch_event(me);
                 }
 
                 if (ws->cursor == cursor_mode::captured)
@@ -1094,27 +1023,27 @@ namespace catalyst::platform::detail
             case WM_GETMINMAXINFO:
             {
                 // Windows sends this before WM_NCCREATE during creation, when there is nothing to constrain yet.
-                if (ws->min_size_px.x <= 0 && ws->min_size_px.y <= 0 && ws->max_size_px.x <= 0 && ws->max_size_px.y <= 0)
+                if (ws->min_size_px.x() <= 0 && ws->min_size_px.y() <= 0 && ws->max_size_px.x() <= 0 && ws->max_size_px.y() <= 0)
                     break;
 
                 auto *mmi = reinterpret_cast<MINMAXINFO *>(lparam);
 
-                if (ws->min_size_px.x > 0 || ws->min_size_px.y > 0)
+                if (ws->min_size_px.x() > 0 || ws->min_size_px.y() > 0)
                 {
                     const auto outer = window_size_for_client(hwnd, ws->min_size_px);
-                    if (ws->min_size_px.x > 0)
-                        mmi->ptMinTrackSize.x = outer.x;
-                    if (ws->min_size_px.y > 0)
-                        mmi->ptMinTrackSize.y = outer.y;
+                    if (ws->min_size_px.x() > 0)
+                        mmi->ptMinTrackSize.x = outer.x();
+                    if (ws->min_size_px.y() > 0)
+                        mmi->ptMinTrackSize.y = outer.y();
                 }
 
-                if (ws->max_size_px.x > 0 || ws->max_size_px.y > 0)
+                if (ws->max_size_px.x() > 0 || ws->max_size_px.y() > 0)
                 {
                     const auto outer = window_size_for_client(hwnd, ws->max_size_px);
-                    if (ws->max_size_px.x > 0)
-                        mmi->ptMaxTrackSize.x = outer.x;
-                    if (ws->max_size_px.y > 0)
-                        mmi->ptMaxTrackSize.y = outer.y;
+                    if (ws->max_size_px.x() > 0)
+                        mmi->ptMaxTrackSize.x = outer.x();
+                    if (ws->max_size_px.y() > 0)
+                        mmi->ptMaxTrackSize.y = outer.y();
                 }
 
                 return 0;
@@ -1131,7 +1060,7 @@ namespace catalyst::platform::detail
                 {
                     window_enter_size_move_event we;
                     we.window = id;
-                    enqueue_event(we);
+                    dispatch_event(we);
                 }
                 break;
             }
@@ -1144,7 +1073,7 @@ namespace catalyst::platform::detail
                 {
                     window_exit_size_move_event we;
                     we.window = id;
-                    enqueue_event(we);
+                    dispatch_event(we);
                 }
                 break;
             }
@@ -1194,7 +1123,7 @@ namespace catalyst::platform::detail
                     window_dpi_changed_event we;
                     we.window = id;
                     we.dpi_scale = scale_from_dpi(HIWORD(wparam)); // the message already carries the new DPI
-                    enqueue_event(we);
+                    dispatch_event(we);
                 }
                 return 0;
             }
@@ -1213,7 +1142,7 @@ namespace catalyst::platform::detail
                     {
                         monitor_changed_event me;
                         me.desc = m;
-                        enqueue_event(me);
+                        dispatch_event(me);
                     }
                 }
                 break;
@@ -1227,7 +1156,7 @@ namespace catalyst::platform::detail
                     window_focus_event fe;
                     fe.window = id;
                     fe.focused = true;
-                    enqueue_event(fe);
+                    dispatch_event(fe);
                 }
 
                 apply_cursor_mode(*ws, true);
@@ -1237,8 +1166,14 @@ namespace catalyst::platform::detail
             {
                 if (publishes)
                 {
-                    release_held_keys(*ws);
-                    release_held_mouse_buttons(*ws);
+                    // One call, and the registry produces exactly the releases its own state calls for - every key and
+                    // button this window still holds, and nothing that it does not. Windows delivers the key-up messages
+                    // for anything released after Alt+Tab to whoever gained focus, so without this they never arrive.
+                    if (g_feed)
+                        g_feed->feed_focus_lost(id);
+
+                    ws->buttons_down = input::mouse_buttons::none;
+                    ws->holds_capture = false;
                 }
 
                 apply_cursor_mode(*ws, false); // suspends the clip / raw input while unfocused
@@ -1248,7 +1183,7 @@ namespace catalyst::platform::detail
                     window_focus_event fe;
                     fe.window = id;
                     fe.focused = false;
-                    enqueue_event(fe);
+                    dispatch_event(fe);
                 }
                 break;
             }
@@ -1257,7 +1192,7 @@ namespace catalyst::platform::detail
                 // Another window (possibly in another process) took the capture: the button-up messages will never
                 // reach us, so report the buttons as released now.
                 if (reinterpret_cast<HWND>(lparam) != hwnd && ws->holds_capture)
-                    release_held_mouse_buttons(*ws);
+                    release_captured_buttons(*ws);
                 break;
             }
             case WM_SYSCOMMAND:
@@ -1294,17 +1229,15 @@ namespace catalyst::platform::detail
                     input::key_event ke;
                     ke.window = id;
                     ke.code = to_input_key_code(wparam, lparam, ke.scancode);
-                    ke.action = repeat ? input::key_action::repeat : input::key_action::press;
+                    ke.action = repeat ? input::button_action::repeat : input::button_action::press;
                     ke.modifiers = current_modifiers();
 
                     // Phantom Shift messages around keypad keys map to unknown with a Shift virtual key; drop them.
                     if (ke.code == input::key_code::unknown && wparam == VK_SHIFT)
                         break;
 
-                    if (ke.code != input::key_code::unknown)
-                        ws->keys_down.set(static_cast<std::size_t>(ke.code));
-
-                    enqueue_event(ke);
+                    if (g_feed)
+                        g_feed->feed_key(ke);
                 }
                 break;
             }
@@ -1316,23 +1249,21 @@ namespace catalyst::platform::detail
                     input::key_event ke;
                     ke.window = id;
                     ke.code = to_input_key_code(wparam, lparam, ke.scancode);
-                    ke.action = input::key_action::release;
+                    ke.action = input::button_action::release;
                     ke.modifiers = current_modifiers();
 
                     if (ke.code == input::key_code::unknown && wparam == VK_SHIFT)
                         break;
 
-                    if (ke.code != input::key_code::unknown)
-                        ws->keys_down.reset(static_cast<std::size_t>(ke.code));
-
-                    enqueue_event(ke);
+                    if (g_feed)
+                        g_feed->feed_key(ke);
                 }
                 break;
             }
             case WM_CHAR:
             {
                 if (publishes)
-                    publish_text(id, utf32_from_utf16_unit(*ws, static_cast<wchar_t>(wparam)));
+                    feed_text(id, utf32_from_utf16_unit(*ws, static_cast<wchar_t>(wparam)));
                 break;
             }
             case WM_UNICHAR:
@@ -1341,7 +1272,7 @@ namespace catalyst::platform::detail
                 if (wparam == UNICODE_NOCHAR)
                     return TRUE;
                 if (publishes)
-                    publish_text(id, static_cast<input::character_code>(wparam));
+                    feed_text(id, static_cast<input::character_code>(wparam));
                 return 0;
             }
 
@@ -1365,7 +1296,8 @@ namespace catalyst::platform::detail
                         input::mouse_enter_event ee;
                         ee.window = id;
                         ee.position_px = pos;
-                        enqueue_event(ee);
+                        if (g_feed)
+                            g_feed->feed_mouse_enter(ee);
                     }
 
                     const math::vec2<std::int32_t> last = ws->has_mouse_pos ? ws->last_mouse_pos_px : pos;
@@ -1375,10 +1307,11 @@ namespace catalyst::platform::detail
                     input::mouse_move_event me;
                     me.window = id;
                     me.position_px = pos;
-                    me.delta_px = {pos.x - last.x, pos.y - last.y};
+                    me.delta_px = {pos.x() - last.x(), pos.y() - last.y()};
                     me.buttons = buttons_from_wparam(wparam);
                     me.modifiers = current_modifiers();
-                    enqueue_event(me);
+                    if (g_feed)
+                        g_feed->feed_mouse_move(me);
                 }
                 break;
             }
@@ -1392,7 +1325,8 @@ namespace catalyst::platform::detail
                     {
                         input::mouse_leave_event le;
                         le.window = id;
-                        enqueue_event(le);
+                        if (g_feed)
+                            g_feed->feed_mouse_leave(le);
                     }
                 }
                 break;
@@ -1414,7 +1348,7 @@ namespace catalyst::platform::detail
                     input::mouse_button_event be;
                     be.window = id;
                     be.button = to_input_mouse_button(msg, wparam);
-                    be.action = input::mouse_button_action::press;
+                    be.action = input::button_action::press;
                     be.clicks = double_click ? 2 : 1;
                     be.position_px = client_pos_from_lparam(lparam);
                     be.modifiers = current_modifiers();
@@ -1427,7 +1361,8 @@ namespace catalyst::platform::detail
                     }
                     ws->buttons_down |= input::to_mouse_buttons(be.button);
 
-                    enqueue_event(be);
+                    if (g_feed)
+                        g_feed->feed_mouse_button(be);
                 }
                 if (msg == WM_XBUTTONDOWN || msg == WM_XBUTTONDBLCLK)
                     return TRUE;
@@ -1443,7 +1378,7 @@ namespace catalyst::platform::detail
                     input::mouse_button_event be;
                     be.window = id;
                     be.button = to_input_mouse_button(msg, wparam);
-                    be.action = input::mouse_button_action::release;
+                    be.action = input::button_action::release;
                     be.clicks = 1;
                     be.position_px = client_pos_from_lparam(lparam);
                     be.modifiers = current_modifiers();
@@ -1455,7 +1390,8 @@ namespace catalyst::platform::detail
                         ReleaseCapture();
                     }
 
-                    enqueue_event(be);
+                    if (g_feed)
+                        g_feed->feed_mouse_button(be);
                 }
                 if (msg == WM_XBUTTONUP)
                     return TRUE;
@@ -1473,7 +1409,8 @@ namespace catalyst::platform::detail
                     we.position_px = client_pos_from_screen_lparam(hwnd, lparam);
                     we.delta = (msg == WM_MOUSEWHEEL) ? math::vec2<float>{0.0f, notches} : math::vec2<float>{notches, 0.0f};
                     we.modifiers = current_modifiers();
-                    enqueue_event(we);
+                    if (g_feed)
+                        g_feed->feed_mouse_wheel(we);
                 }
                 break;
             }
@@ -1647,7 +1584,7 @@ namespace catalyst::platform::detail
             GetClientRect(hwnd, &cr);
             e.width_px = ui::px(static_cast<float>(cr.right - cr.left));
             e.height_px = ui::px(static_cast<float>(cr.bottom - cr.top));
-            enqueue_event(e);
+            dispatch_event(e);
         }
         {
             window_moved_event e;
@@ -1655,13 +1592,13 @@ namespace catalyst::platform::detail
             POINT origin{0, 0};
             ClientToScreen(hwnd, &origin);
             e.position_px = {static_cast<std::int32_t>(origin.x), static_cast<std::int32_t>(origin.y)};
-            enqueue_event(e);
+            dispatch_event(e);
         }
         {
             window_dpi_changed_event e;
             e.window = id;
             e.dpi_scale = scale_from_dpi(actual_dpi);
-            enqueue_event(e);
+            dispatch_event(e);
         }
         if (GetFocus() == hwnd)
         {
@@ -1669,7 +1606,7 @@ namespace catalyst::platform::detail
             window_focus_event e;
             e.window = id;
             e.focused = true;
-            enqueue_event(e);
+            dispatch_event(e);
         }
 
         return id;
@@ -1719,11 +1656,11 @@ namespace catalyst::platform::detail
      * @fn client_rect_px
      * @brief The window's client area in pixels, with its origin at (0,0).
      */
-    math::rect<std::int32_t> client_rect_px(window_id id) noexcept
+    rect_px client_rect_px(window_id id) noexcept
     {
         HWND hwnd = hwnd_from_id(id);
         if (!hwnd)
-            return {{0, 0}, {0, 0}};
+            return {};
 
         RECT r{};
         GetClientRect(hwnd, &r);
@@ -1799,37 +1736,43 @@ namespace catalyst::platform::detail
     }
 
     /**
-     * @fn poll_event
-     * @brief Removes and returns the oldest queued event, if any. Always returns false while an event sink is installed,
-     * because a sink is published to directly and nothing is queued.
+     * @fn set_event_bus
+     * @brief Installs the bus window events are dispatched to, or nullptr to dispatch none.
      */
-    bool poll_event(std::unique_ptr<core::event_base> &out) noexcept
+    void set_event_bus(events::bus *bus) noexcept
     {
-        return g_events.try_pop(out);
+        g_bus = bus;
     }
 
     /**
-     * @fn set_event_sink
-     * @brief Installs the sink events are published to, or nullptr to go back to queueing them for poll_event().
+     * @fn event_bus
+     * @brief The bus installed with set_event_bus, or nullptr.
      */
-    void set_event_sink(core::event_sink *sink) noexcept
+    events::bus *event_bus() noexcept
     {
-        g_event_sink = sink;
+        return g_bus;
     }
 
-    void set_event_queue_capacity(std::size_t max_events) noexcept
+    /**
+     * @fn set_input_feed
+     * @brief Installs the feed window-sourced input is delivered to, or nullptr to deliver none.
+     * @details Installing a feed mid-session is safe: this backend keeps no input state of its own beyond the mouse
+     * capture, so a feed that arrives late simply starts receiving events from the next message, and one that is removed
+     * stops receiving them. Neither leaves anything stuck down, because what is held is the registry's state, not this
+     * backend's.
+     */
+    void set_input_feed(input::event_feed *feed) noexcept
     {
-        g_events.set_capacity(max_events);
+        g_feed = feed;
     }
 
-    std::size_t event_queue_capacity() noexcept
+    /**
+     * @fn input_feed
+     * @brief The feed installed with set_input_feed, or nullptr.
+     */
+    input::event_feed *input_feed() noexcept
     {
-        return g_events.capacity();
-    }
-
-    std::size_t dropped_event_count() noexcept
-    {
-        return g_events.dropped_count();
+        return g_feed;
     }
 
     // -----------------------------------------------------------------------------------------------------------------
@@ -1907,8 +1850,8 @@ namespace catalyst::platform::detail
         adjust_rect_for_window(hwnd, offset);
 
         SetWindowPos(hwnd, nullptr,
-                     position_px.x + offset.left,
-                     position_px.y + offset.top,
+                     position_px.x() + offset.left,
+                     position_px.y() + offset.top,
                      0, 0,
                      SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
@@ -1930,8 +1873,8 @@ namespace catalyst::platform::detail
         if (!ws)
             return;
 
-        ws->min_size_px = {std::max(0, min_px.x), std::max(0, min_px.y)};
-        ws->max_size_px = {std::max(0, max_px.x), std::max(0, max_px.y)};
+        ws->min_size_px = {std::max(0, min_px.x()), std::max(0, min_px.y())};
+        ws->max_size_px = {std::max(0, max_px.x()), std::max(0, max_px.y())};
 
         // Nudge the window so the new constraints are applied to its current size straight away rather than only on the
         // user's next drag.

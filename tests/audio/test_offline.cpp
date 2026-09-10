@@ -7,7 +7,7 @@
  * License: CDDL-1.0 (see LICENSE).
  */
 
-#include "../core/test_common.hpp"
+#include "../test_common.hpp"
 
 #include <catalyst/audio/engine.hpp>
 

@@ -43,10 +43,10 @@ namespace
         const rect r = rect::from_xywh(0.0f, 0.0f, 10.0f, 10.0f);
         const rect collapsed = deflate(r, edges_px::all(50.0f));
 
-        CT_REQUIRE(collapsed.max.x >= collapsed.min.x);
-        CT_REQUIRE(collapsed.max.y >= collapsed.min.y);
-        CT_REQUIRE(near(collapsed.max.x - collapsed.min.x, 0.0f));
-        CT_REQUIRE(near(collapsed.max.y - collapsed.min.y, 0.0f));
+        CT_REQUIRE(collapsed.max.x() >= collapsed.min.x());
+        CT_REQUIRE(collapsed.max.y() >= collapsed.min.y());
+        CT_REQUIRE(near(collapsed.max.x() - collapsed.min.x(), 0.0f));
+        CT_REQUIRE(near(collapsed.max.y() - collapsed.min.y(), 0.0f));
     }
 
     void test_resolve_edges_uses_width_on_every_side()

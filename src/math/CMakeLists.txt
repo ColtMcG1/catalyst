@@ -1,6 +1,5 @@
 add_library(catalyst_math STATIC
   math.cpp
-  simd.cpp
 )
 
 add_library(catalyst::math ALIAS catalyst_math)

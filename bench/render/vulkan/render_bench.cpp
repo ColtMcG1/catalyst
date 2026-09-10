@@ -303,8 +303,8 @@ namespace catalyst::bench::render
         rendering::extent2d client_extent(const platform::window &w) noexcept
         {
             const auto client = platform::client_rect_px(w);
-            return {static_cast<std::uint32_t>(std::max(client.size().x, 0)),
-                    static_cast<std::uint32_t>(std::max(client.size().y, 0))};
+            return {static_cast<std::uint32_t>(std::max(client.size().x(), 0)),
+                    static_cast<std::uint32_t>(std::max(client.size().y(), 0))};
         }
     } // namespace
 

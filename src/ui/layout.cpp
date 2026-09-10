@@ -45,14 +45,14 @@ namespace catalyst::ui
         [[nodiscard]] axis main_axis_of(flex_direction d) noexcept { return is_row(d) ? axis::x : axis::y; }
         [[nodiscard]] axis cross_axis_of(flex_direction d) noexcept { return is_row(d) ? axis::y : axis::x; }
 
-        [[nodiscard]] float get_axis(const extent &e, axis a) noexcept { return (a == axis::x) ? e.x : e.y; }
+        [[nodiscard]] float get_axis(const extent &e, axis a) noexcept { return (a == axis::x) ? e.x() : e.y(); }
 
         void set_axis(extent &e, axis a, float v) noexcept
         {
             if (a == axis::x)
-                e.x = v;
+                e.x() = v;
             else
-                e.y = v;
+                e.y() = v;
         }
 
         /**
@@ -449,13 +449,13 @@ namespace catalyst::ui
                 else
                     p = point{pos_cross, pos_main};
 
-                p.x += padding.left;
-                p.y += padding.top;
+                p.x() += padding.left;
+                p.y() += padding.top;
 
                 if (cs.position == position_mode::relative)
                 {
-                    p.x += relative_offset(cs.inset, axis::x, ctx);
-                    p.y += relative_offset(cs.inset, axis::y, ctx);
+                    p.x() += relative_offset(cs.inset, axis::x, ctx);
+                    p.y() += relative_offset(cs.inset, axis::y, ctx);
                 }
 
                 t.mutable_layout(it.n).position = p;
@@ -527,13 +527,13 @@ namespace catalyst::ui
                 if (has_left)
                     x = left + m.margin.left;
                 else if (has_right)
-                    x = pb_w - right - m.margin.right - m.size.x;
+                    x = pb_w - right - m.margin.right - m.size.x();
 
                 float y = m.margin.top;
                 if (has_top)
                     y = top + m.margin.top;
                 else if (has_bottom)
-                    y = pb_h - bottom - m.margin.bottom - m.size.y;
+                    y = pb_h - bottom - m.margin.bottom - m.size.y();
 
                 t.mutable_layout(c).position = point{x, y};
             }
@@ -629,8 +629,8 @@ namespace catalyst::ui
                 mi.context = ctx;
 
                 content = measure(mi, t.measure_user(n));
-                content.x = std::max(0.0f, content.x);
-                content.y = std::max(0.0f, content.y);
+                content.x() = std::max(0.0f, content.x());
+                content.y() = std::max(0.0f, content.y());
             }
             else if (has_children)
             {
@@ -638,8 +638,8 @@ namespace catalyst::ui
                                           inner_h_bounded, padding);
             }
 
-            const float final_w = clamp_w(spec_w_def ? spec_w : content.x + surround.horizontal());
-            const float final_h = clamp_h(spec_h_def ? spec_h : content.y + surround.vertical());
+            const float final_w = clamp_w(spec_w_def ? spec_w : content.x() + surround.horizontal());
+            const float final_h = clamp_h(spec_h_def ? spec_h : content.y() + surround.vertical());
 
             // Min/max clamping can move the content box after the children were placed against it. That
             // only happens when a bound actually bit, so the second pass is rare and never cascades: it
@@ -649,7 +649,7 @@ namespace catalyst::ui
                 const float fit_w = std::max(0.0f, final_w - surround.horizontal());
                 const float fit_h = std::max(0.0f, final_h - surround.vertical());
 
-                if (std::fabs(fit_w - content.x) > k_epsilon || std::fabs(fit_h - content.y) > k_epsilon)
+                if (std::fabs(fit_w - content.x()) > k_epsilon || std::fabs(fit_h - content.y()) > k_epsilon)
                     content = layout_children(t, n, ctx, fit_w, fit_h, true, true, true, true, padding);
             }
 
@@ -686,7 +686,7 @@ namespace catalyst::ui
 
             r.position = absolute;
 
-            const point child_origin{absolute.x + r.border.left, absolute.y + r.border.top};
+            const point child_origin{absolute.x() + r.border.left, absolute.y() + r.border.top};
 
             const std::span<const node> kids = t.children_of(n);
             const std::vector<node> children(kids.begin(), kids.end());
@@ -697,7 +697,7 @@ namespace catalyst::ui
                 if (!cr.laid_out || cr.hidden)
                     continue;
 
-                apply_offsets(t, c, point{child_origin.x + cr.position.x, child_origin.y + cr.position.y});
+                apply_offsets(t, c, point{child_origin.x() + cr.position.x(), child_origin.y() + cr.position.y()});
             }
         }
 
@@ -709,14 +709,14 @@ namespace catalyst::ui
             return;
 
         outer_constraint oc{};
-        oc.avail_w = params.available.x;
-        oc.avail_h = params.available.y;
+        oc.avail_w = params.available.x();
+        oc.avail_h = params.available.y();
         oc.avail_w_bounded = params.width_definite;
         oc.avail_h_bounded = params.height_definite;
 
         const measured m = layout_node(t, root, params.context, oc);
 
-        apply_offsets(t, root, point{params.origin.x + m.margin.left, params.origin.y + m.margin.top});
+        apply_offsets(t, root, point{params.origin.x() + m.margin.left, params.origin.y() + m.margin.top});
 
         t.clear_dirty(root);
     }

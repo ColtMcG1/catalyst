@@ -10,7 +10,7 @@
  * is meaningful on the bookkeeping null backend and on a real Vulkan device.
  */
 
-#include "../core/test_common.hpp"
+#include "../test_common.hpp"
 #include "test_shaders.hpp"
 
 #include <catalyst/rendering/rendering.hpp>
