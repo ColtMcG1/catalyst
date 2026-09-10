@@ -6,7 +6,9 @@
  * cleanly shut down after playback. The tone is derived from `render_context::stream_time_frames`
  * and the negotiated sample rate rather than from a private counter, which keeps pitch correct
  * even when the device refuses the requested rate. Fades at both ends minimise clicks, and the
- * stream's health counters are printed at the end.
+ * stream's health counters are logged at the end. Nothing is logged from the render callback: that
+ * runs on the device's real-time thread, where formatting a message is exactly the kind of work
+ * that produces the xruns it would be reporting.
  * License: CDDL-1.0 (see LICENSE).
  */
 
@@ -15,12 +17,19 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
-#include <cstdio>
 #include <cstdint>
 #include <limits>
 #include <thread>
 
+namespace logging = catalyst::logging;
+
 namespace {
+
+/** @brief Names this example in the log's category column. */
+struct example_log
+{
+  static constexpr const char *name = "audio_playback";
+};
 
 constexpr double two_pi = 6.2831853071795864769;
 
@@ -91,6 +100,10 @@ int main()
 
   catalyst::catalyst_version_anchor();
 
+  // One console sink, and every line below reaches the terminal, coloured when the terminal
+  // understands colour. Sending the same log to a file is one more add_sink, and no change here.
+  logging::default_logger().add_sink(logging::console_sink{});
+
   engine audio_engine;
   tone_state tone;
 
@@ -102,26 +115,23 @@ int main()
   cfg.user = &tone;
 
   for (const auto backend : engine::available_backends())
-    std::printf("Available backend: %s\n", to_string(backend).data());
+    logging::info<example_log>("Available backend: {}", to_string(backend));
 
   if (const auto devices = engine::devices(engine_backend::automatic); devices)
   {
     for (const auto& device : *devices)
     {
-      std::printf(
-          " - Device: %s%s\n    id: %s\n",
-          device.name.c_str(),
+      logging::info<example_log>(
+          " - Device: {}{}, id: {}",
+          device.name,
           device.is_default ? " (default)" : "",
-          device.id.c_str());
+          device.id);
     }
   }
 
   if (const auto result = audio_engine.initialize(cfg); !result)
   {
-    std::fprintf(
-        stderr,
-        "Failed to initialize audio engine: %s\n",
-        to_string(result.error()).data());
+    logging::critical<example_log>("Failed to initialize audio engine: {}", to_string(result.error()));
     return 1;
   }
 
@@ -130,10 +140,10 @@ int main()
   const auto info = audio_engine.info();
   tone.fade_frames = info.sample_rate / 50; // 20ms
 
-  std::printf(
-      "Backend: %s\nDevice: %s\nFormat: %u Hz, %u ch, %u frames/buffer, %.2f ms latency%s\n",
-      audio_engine.backend_name().data(),
-      info.device_name.c_str(),
+  logging::info<example_log>("Backend: {}", audio_engine.backend_name());
+  logging::info<example_log>("Device: {}", info.device_name);
+  logging::info<example_log>(
+      "Format: {} Hz, {} ch, {} frames/buffer, {:.2f} ms latency{}",
       info.sample_rate,
       info.output_channels,
       info.buffer_frames,
@@ -142,14 +152,11 @@ int main()
 
   if (const auto result = audio_engine.start(); !result)
   {
-    std::fprintf(
-        stderr,
-        "Failed to start audio engine: %s\n",
-        to_string(result.error()).data());
+    logging::critical<example_log>("Failed to start audio engine: {}", to_string(result.error()));
     return 1;
   }
 
-  std::printf("Playing %.0fHz test tone for 2 seconds...\n", tone.frequency_hz);
+  logging::info<example_log>("Playing {:.0f}Hz test tone for 2 seconds...", tone.frequency_hz);
   std::this_thread::sleep_for(std::chrono::seconds(2));
 
   // Request a short fade-out before stopping to reduce clicks.
@@ -160,11 +167,11 @@ int main()
   audio_engine.stop();
 
   const auto stats = audio_engine.stats();
-  std::printf(
-      "Rendered %llu frames in %llu callbacks; %llu xruns, peak load %.1f%%\n",
-      static_cast<unsigned long long>(stats.frames_rendered),
-      static_cast<unsigned long long>(stats.callback_count),
-      static_cast<unsigned long long>(stats.xruns),
+  logging::info<example_log>(
+      "Rendered {} frames in {} callbacks; {} xruns, peak load {:.1f}%",
+      stats.frames_rendered,
+      stats.callback_count,
+      stats.xruns,
       stats.peak_load * 100.0);
 
   audio_engine.shutdown();

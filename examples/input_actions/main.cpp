@@ -12,25 +12,35 @@
  *
  * The simulated device near the end is worth a look: it registers as a gamepad, and the same bindings pick it up with
  * no special case anywhere. That is what makes a replay, a network peer or an on-screen pad possible.
+ *
+ * Everything it reports goes through catalyst::logging, so the readout carries a level and a category and can be sent
+ * somewhere else by adding a sink rather than by changing any of the code below.
  * License: CDDL-1.0 (see LICENSE).
  */
 
 #include <catalyst/events/bus.hpp>
 #include <catalyst/input/input.hpp>
+#include <catalyst/logging/logging.hpp>
 
 #include <chrono>
-#include <cstdio>
 #include <string>
 #include <thread>
 
 namespace input = catalyst::input;
 namespace events = catalyst::events;
+namespace logging = catalyst::logging;
 
 using namespace catalyst::input::bind;
 using namespace std::chrono_literals;
 
 namespace
 {
+    /** @brief Names this example in the log's category column. */
+    struct example_log
+    {
+        static constexpr const char *name = "input_actions";
+    };
+
     const char *phase_name(input::action_phase p)
     {
         switch (p)
@@ -57,11 +67,15 @@ namespace
 
 int main()
 {
+    // One console sink, and every line below reaches the terminal, coloured when the terminal
+    // understands colour. Sending the same readout to a file is one more add_sink, and no change here.
+    logging::default_logger().add_sink(logging::console_sink{});
+
     events::bus bus;
     input::context in(bus);
 
-    std::printf("Catalyst input_actions (backend: %s, %zu gamepad slots)\n\n",
-                in.backend_name(), in.gamepad_capacity());
+    logging::info<example_log>("Catalyst input_actions (backend: {}, {} gamepad slots)", in.backend_name(),
+                               in.gamepad_capacity());
 
     // ------------------------------------------------------------------------------------------------------------------
     // Actions. This is the layer game code should live at: it names what the player can do, and the bindings below say
@@ -97,32 +111,32 @@ int main()
     const auto on_connect = bus.add_listener<input::device_connected_event>(
         [](const input::device_connected_event &e)
         {
-            std::printf("+ %s connected (%s, slot %u, %zu controls)\n",
-                        e.info.name.c_str(), std::string(input::device_kind_name(e.info.kind)).c_str(),
-                        e.info.slot, e.layout ? e.layout->size() : 0);
+            logging::info<example_log>("+ {} connected ({}, slot {}, {} controls)", e.info.name,
+                                       input::device_kind_name(e.info.kind), e.info.slot,
+                                       e.layout ? e.layout->size() : 0);
         });
 
     const auto on_disconnect = bus.add_listener<input::device_disconnected_event>(
         [](const input::device_disconnected_event &e)
-        { std::printf("- %s disconnected\n", e.info.name.c_str()); });
+        { logging::info<example_log>("- {} disconnected", e.info.name); });
 
     const auto on_action = bus.add_listener<input::action_event>(
         [](const input::action_event &e)
         {
             // Continuous actions fire every frame they are away from rest; only log the discrete ones.
             if (e.phase == input::action_phase::performed && e.value.kind == input::action_kind::button)
-                std::printf("  action %.*s %s (%lld ms)\n", static_cast<int>(e.name.size()), e.name.data(),
-                            phase_name(e.phase), static_cast<long long>(e.elapsed.count()));
+                logging::info<example_log>("  action {} {} ({} ms)", e.name, phase_name(e.phase),
+                                           static_cast<long long>(e.elapsed.count()));
         });
 
-    std::printf("Plug in a gamepad and try it:\n"
-                "  left stick / d-pad   move\n"
-                "  right stick          look\n"
-                "  A or right trigger   fire\n"
-                "  hold L3 400ms        sprint\n"
-                "  double-tap B         dodge\n"
-                "  Start                quit\n\n"
-                "Running for 15 seconds with no pad attached, then demonstrating a simulated one.\n\n");
+    logging::info<example_log>("Plug in a gamepad and try it:");
+    logging::info<example_log>("  left stick / d-pad   move");
+    logging::info<example_log>("  right stick          look");
+    logging::info<example_log>("  A or right trigger   fire");
+    logging::info<example_log>("  hold L3 400ms        sprint");
+    logging::info<example_log>("  double-tap B         dodge");
+    logging::info<example_log>("  Start                quit");
+    logging::info<example_log>("Running for 15 seconds with no pad attached, then demonstrating a simulated one.");
 
     // ------------------------------------------------------------------------------------------------------------------
     // The frame. The order is not arbitrary: new_frame() empties this frame's edges and deltas before anything is added
@@ -140,27 +154,28 @@ int main()
 
         if (quit.was_performed())
         {
-            std::printf("\nquit\n");
+            logging::info<example_log>("quit");
             break;
         }
 
-        // Once a second, print what the first pad is doing - straight from input_state, no actions involved.
+        // Once a second, report what the first pad is doing - straight from input_state, no actions involved. It is a
+        // periodic readout rather than an event, so it goes out at trace.
         if (++frame % 60 == 0 && in.state().is_gamepad_connected(0))
         {
             const input::gamepad_state g = in.state().gamepad(0);
-            std::printf("  pad0  LX %+.2f LY %+.2f  LT %s RT %s  move %s\n",
-                        g.axis(input::gamepad_axis::left_x), g.axis(input::gamepad_axis::left_y),
-                        bar(static_cast<float>(g.axis(input::gamepad_axis::left_trigger)), 10).c_str(),
-                        bar(static_cast<float>(g.axis(input::gamepad_axis::right_trigger)), 10).c_str(),
-                        bar(move.value().magnitude(), 10).c_str());
+            logging::trace<example_log>("  pad0  LX {:+.2f} LY {:+.2f}  LT {} RT {}  move {}",
+                                        g.axis(input::gamepad_axis::left_x), g.axis(input::gamepad_axis::left_y),
+                                        bar(static_cast<float>(g.axis(input::gamepad_axis::left_trigger)), 10),
+                                        bar(static_cast<float>(g.axis(input::gamepad_axis::right_trigger)), 10),
+                                        bar(move.value().magnitude(), 10));
         }
 
         if (sprint.was_performed())
-            std::printf("  sprinting\n");
+            logging::info<example_log>("  sprinting");
         if (dodge.was_performed())
-            std::printf("  dodge!\n");
+            logging::info<example_log>("  dodge!");
         if (fire.is_held() && frame % 10 == 0)
-            std::printf("  firing  %s\n", bar(fire.value().as_float(), 10).c_str());
+            logging::trace<example_log>("  firing  {}", bar(fire.value().as_float(), 10));
 
         std::this_thread::sleep_for(16ms);
     }
@@ -170,7 +185,7 @@ int main()
     // input_state reports it, because from every layer's point of view it is a gamepad.
     // ------------------------------------------------------------------------------------------------------------------
 
-    std::printf("\nSimulated pad:\n");
+    logging::info<example_log>("Simulated pad:");
     const input::device_id fake =
         in.add_simulated_device(input::device_kind::gamepad, input::gamepad_layout(), "Scripted Pad", 3);
 
@@ -180,9 +195,8 @@ int main()
         script();
         in.poll();
         in.update();
-        std::printf("  %-22s move %s  fire %s\n", what,
-                    bar(move.value().magnitude(), 10).c_str(),
-                    fire.is_held() ? "yes" : "no");
+        logging::info<example_log>("  {:<22} move {}  fire {}", what, bar(move.value().magnitude(), 10),
+                                   fire.is_held() ? "yes" : "no");
     };
 
     drive("stick pushed right", [&]
@@ -195,7 +209,7 @@ int main()
           { in.devices().set_value(fake, input::control_of(input::gamepad_axis::right_trigger), 0.0f); });
 
     // Rebinding is the same operation a controls screen performs, and it takes effect on the next frame.
-    std::printf("\nRebinding \"fire\" to the left trigger:\n");
+    logging::info<example_log>("Rebinding \"fire\" to the left trigger:");
     fire.rebind(0, pad(input::gamepad_axis::left_trigger).press_point(0.4f).as_override());
 
     drive("right trigger pulled", [&]
@@ -203,6 +217,6 @@ int main()
     drive("left trigger pulled", [&]
           { in.devices().set_value(fake, input::control_of(input::gamepad_axis::left_trigger), 0.8f); });
 
-    std::printf("\n%zu device(s) connected at exit\n", in.devices().size());
+    logging::info<example_log>("{} device(s) connected at exit", in.devices().size());
     return 0;
 }

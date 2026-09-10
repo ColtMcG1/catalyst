@@ -3,25 +3,40 @@
  * @brief Example of using the Catalyst platform library to create a window and pump events once per frame.
  * @details This example demonstrates how to initialize the Catalyst platform library, create a window, install an event
  * bus, and enter a main loop that pumps OS messages once per frame. The example handles window close requests and resize
- * events, printing relevant information to the console. It simulates a simple frame loop with a sleep to mimic a 60 Hz
- * update rate. This serves as a basic template for using the Catalyst platform library in applications that require
- * window management and event handling.
+ * events, logging relevant information through the Catalyst logging module. It simulates a simple frame loop with a
+ * sleep to mimic a 60 Hz update rate. This serves as a basic template for using the Catalyst platform library in
+ * applications that require window management and event handling.
  * License: CDDL-1.0 (see LICENSE).
  */
 
 #include <catalyst/catalyst.hpp>
 #include <catalyst/events/bus.hpp>
+#include <catalyst/logging/logging.hpp>
 #include <catalyst/platform/window.hpp>
 
-#include <cstdio>
 #include <chrono>
 #include <thread>
+
+namespace logging = catalyst::logging;
+
+namespace
+{
+  /** @brief Names this example in the log's category column. */
+  struct example_log
+  {
+    static constexpr const char *name = "window_polling";
+  };
+} // namespace
 
 int main()
 {
   catalyst::catalyst_version_anchor();
 
   using namespace catalyst::platform;
+
+  // One console sink is all it takes for the calls below to reach the terminal, and colour turns
+  // itself on when the stream turns out to be one.
+  logging::default_logger().add_sink(logging::console_sink{});
 
   window_desc desc;
   desc.title = "Catalyst - window_polling";
@@ -32,11 +47,11 @@ int main()
   window w = create_window(desc);
   if (!w)
   {
-    std::fprintf(stderr, "Failed to create window\n");
+    logging::critical<example_log>("Failed to create window");
     return 1;
   }
 
-  std::printf("Polling example: call pump_events() once per frame.\n");
+  logging::info<example_log>("Polling example: call pump_events() once per frame.");
 
   // Window events are dispatched to this bus, synchronously from pump_events(). Keyboard and mouse events do not come
   // through here: those go to the input::event_feed installed with set_input_feed, which input::context implements.
@@ -48,7 +63,7 @@ int main()
   const catalyst::events::scoped_token sub_close =
       bus.add_listener<window_close_requested_event>([&](const window_close_requested_event &)
                                                     {
-                                                      std::printf("Close requested\n");
+                                                      logging::info<example_log>("Close requested");
                                                       running = false;
                                                     });
 
@@ -58,27 +73,28 @@ int main()
                                               // The event carries ui::length measurements, which resolve to pixels
                                               // against the window's DPI context.
                                               const auto ctx = resolve_context_for_window(w);
-                                              std::printf("Resized: %.0f x %.0f\n",
+                                              logging::info<example_log>("Resized: {:.0f} x {:.0f}",
                                                           catalyst::ui::resolve_or(e.width_px, catalyst::ui::axis::x, ctx),
                                                           catalyst::ui::resolve_or(e.height_px, catalyst::ui::axis::y, ctx));
                                             });
 
   const catalyst::events::scoped_token sub_enter =
       bus.add_listener<window_enter_size_move_event>([](const window_enter_size_move_event &)
-                                                    { std::printf("Enter size/move (interactive resize begins)\n"); });
+                                                    { logging::info<example_log>("Enter size/move (interactive resize begins)"); });
 
   const catalyst::events::scoped_token sub_exit =
       bus.add_listener<window_exit_size_move_event>([](const window_exit_size_move_event &)
-                                                   { std::printf("Exit size/move (interactive resize ends)\n"); });
+                                                   { logging::info<example_log>("Exit size/move (interactive resize ends)"); });
 
   while (running && is_valid(w))
   {
     // Non-blocking: drain OS messages, dispatching each one to the bus as it is translated.
     pump_events();
 
-    // Simulate a frame (60 Hz).
+    // Simulate a frame (60 Hz). One line per frame is what trace is for: it is off in any build
+    // whose floor is above it, and quiet in one whose router minimum is.
     std::this_thread::sleep_for(std::chrono::milliseconds(16));
-    std::printf("Frame...\n");
+    logging::trace<example_log>("Frame...");
   }
 
   set_event_bus(nullptr);

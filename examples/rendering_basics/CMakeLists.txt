@@ -10,7 +10,7 @@ add_executable(catalyst_rendering_basics
 if(TARGET catalyst)
   target_link_libraries(catalyst_rendering_basics PRIVATE catalyst)
 else()
-  target_link_libraries(catalyst_rendering_basics PRIVATE catalyst::rendering catalyst::platform)
+  target_link_libraries(catalyst_rendering_basics PRIVATE catalyst::rendering catalyst::platform catalyst::logging)
 endif()
 
 target_include_directories(catalyst_rendering_basics PRIVATE ${PROJECT_SOURCE_DIR}/include)

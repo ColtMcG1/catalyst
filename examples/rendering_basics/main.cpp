@@ -19,12 +19,19 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <span>
 #include <thread>
 
+namespace logging = catalyst::logging;
+
 namespace
 {
+    /** @brief Names this example in the log's category column. */
+    struct example_log
+    {
+        static constexpr const char *name = "rendering_basics";
+    };
+
     struct vertex
     {
         float x, y, z;
@@ -45,7 +52,8 @@ namespace
 
         if (native_bytecode_format(backend()) != shader_bytecode_format::spirv)
         {
-            std::printf("Backend %s does not consume SPIR-V; drawing only the clear colour\n", module_name());
+            logging::warn<example_log>("Backend {} does not consume SPIR-V; drawing only the clear colour",
+                                       module_name());
             return {};
         }
 
@@ -82,7 +90,7 @@ namespace
         destroy_shader(fs);
 
         if (!p)
-            std::fprintf(stderr, "Failed to create the triangle pipeline; drawing only the clear colour\n");
+            logging::error<example_log>("Failed to create the triangle pipeline; drawing only the clear colour");
         return p;
     }
 } // namespace
@@ -92,12 +100,16 @@ int main()
     using namespace catalyst;
     catalyst_version_anchor();
 
+    // One console sink, and every line below reaches the terminal, coloured when the terminal
+    // understands colour. Sending the same log to a file is one more add_sink, and no change here.
+    logging::default_logger().add_sink(logging::console_sink{});
+
     platform::window_desc wd;
     wd.title = "Catalyst rendering basics";
     platform::window w = platform::create_window(wd);
     if (!w)
     {
-        std::fprintf(stderr, "Failed to create window\n");
+        logging::critical<example_log>("Failed to create window");
         return 1;
     }
 
@@ -107,14 +119,14 @@ int main()
     rendering::device dev = rendering::create_device(dd);
     if (!dev)
     {
-        std::fprintf(stderr, "Failed to create rendering device\n");
+        logging::critical<example_log>("Failed to create rendering device");
         return 1;
     }
 
     const rendering::device_info info = rendering::get_device_info(dev);
-    std::printf("Rendering backend: %s\n", rendering::to_string(info.backend));
-    std::printf("Adapter: %s (%llu MiB device-local)\n", info.adapter_name,
-                static_cast<unsigned long long>(info.dedicated_video_memory_bytes >> 20));
+    logging::info<example_log>("Rendering backend: {}", rendering::to_string(info.backend));
+    logging::info<example_log>("Adapter: {} ({} MiB device-local)", info.adapter_name,
+                               info.dedicated_video_memory_bytes >> 20);
 
     auto client_extent = [&]() -> rendering::extent2d {
         const auto client = platform::client_rect_px(w);
@@ -128,16 +140,16 @@ int main()
     rendering::swapchain sc = rendering::create_swapchain(dev, sd);
     if (!sc)
     {
-        std::fprintf(stderr, "Failed to create swapchain\n");
+        logging::critical<example_log>("Failed to create swapchain");
         return 1;
     }
     sd = rendering::get_swapchain_desc(sc); // The backend may have adjusted extent, format or image count.
-    std::printf("Swapchain: %ux%u, %u images\n", sd.extent.width, sd.extent.height, sd.image_count);
+    logging::info<example_log>("Swapchain: {}x{}, {} images", sd.extent.width, sd.extent.height, sd.image_count);
 
     auto vb = rendering::create_structured_buffer<vertex>(dev, std::size(triangle), rendering::buffer_usage::vertex,
                                                           rendering::memory_access::gpu_only,
                                                           std::span<const vertex>{triangle}, "triangle vertices");
-    std::printf("Vertex buffer: %zu vertices, %zu bytes\n", vb.count(), vb.size_bytes());
+    logging::info<example_log>("Vertex buffer: {} vertices, {} bytes", vb.count(), vb.size_bytes());
 
     rendering::pipeline pipeline = make_triangle_pipeline(dev, sd.pixel_format);
     rendering::command_list cl = rendering::create_command_list(dev, {.debug_name = "frame"});
@@ -198,6 +210,6 @@ int main()
     rendering::destroy_device(dev);
     platform::destroy_window(w);
 
-    std::printf("Rendered %d of %d frames\n", rendered, frame_count);
+    logging::info<example_log>("Rendered {} of {} frames", rendered, frame_count);
     return 0;
 }
