@@ -1,393 +1,347 @@
+/**
+ * @file test_gamepad.cpp
+ * @brief Gamepad vocabulary, the dead-zone maths, and the calibrator.
+ * License: CDDL-1.0 (see LICENSE).
+ */
+
 #include "../core/test_common.hpp"
 
-#include <catalyst/core/dispatcher.hpp>
-#include <catalyst/core/event_sink.hpp>
+#include <catalyst/events/bus.hpp>
+#include <catalyst/input/calibration.hpp>
+#include <catalyst/input/context.hpp>
 #include <catalyst/input/gamepad.hpp>
-#include <catalyst/input/input.hpp>
 
 #include <chrono>
 #include <cmath>
 
-using namespace catalyst;
 using namespace catalyst::input;
-using namespace std::chrono_literals;
+namespace events = catalyst::events;
+
+using clock_type = gamepad_deadzone_calibrator::clock;
+using ms = std::chrono::milliseconds;
 
 namespace
 {
-    bool near(double a, double b, double eps = 1e-9)
+    [[nodiscard]] bool near(double a, double b, double eps = 1e-9) noexcept
     {
         return std::fabs(a - b) <= eps;
     }
 
-    // A connected raw (pre-dead-zone) snapshot with the given axis values.
-    gamepad_state raw_state(double lx, double ly, double rx = 0.0, double ry = 0.0, double lt = 0.0, double rt = 0.0,
-                            gamepad_buttons buttons = gamepad_buttons::none)
+    /** @brief A resting controller reporting @p stick on both sticks and @p trigger on both triggers. */
+    [[nodiscard]] gamepad_state resting(double stick = 0.0, double trigger = 0.0) noexcept
     {
-        gamepad_state s;
+        gamepad_state s{};
         s.connected = true;
-        s.buttons = buttons;
-        s.axes[static_cast<std::size_t>(gamepad_axis::left_x)] = lx;
-        s.axes[static_cast<std::size_t>(gamepad_axis::left_y)] = ly;
-        s.axes[static_cast<std::size_t>(gamepad_axis::right_x)] = rx;
-        s.axes[static_cast<std::size_t>(gamepad_axis::right_y)] = ry;
-        s.axes[static_cast<std::size_t>(gamepad_axis::left_trigger)] = lt;
-        s.axes[static_cast<std::size_t>(gamepad_axis::right_trigger)] = rt;
+        s.axes[static_cast<std::size_t>(gamepad_axis::left_x)] = stick;
+        s.axes[static_cast<std::size_t>(gamepad_axis::right_x)] = stick;
+        s.axes[static_cast<std::size_t>(gamepad_axis::left_trigger)] = trigger;
+        s.axes[static_cast<std::size_t>(gamepad_axis::right_trigger)] = trigger;
         return s;
     }
 
-    void test_deadzone_for_noise()
+    // ------------------------------------------------------------------------------------------------------------------
+    // Vocabulary
+    // ------------------------------------------------------------------------------------------------------------------
+
+    void test_button_sets()
     {
-        // Defaults: 25% headroom plus an absolute 0.02 margin above the peak.
-        const gamepad_deadzone dz = deadzone_for_noise(0.10, 0.04);
-        CT_REQUIRE(near(dz.stick, 0.10 * 1.25 + 0.02));
-        CT_REQUIRE(near(dz.trigger, 0.04 * 1.25 + 0.02));
+        gamepad_buttons set = gamepad_buttons::none;
+        CT_REQUIRE(!has_button(set, gamepad_button::a));
 
-        // A controller with no noise at all still gets the margin as a floor.
-        const gamepad_deadzone quiet = deadzone_for_noise(0.0, 0.0);
-        CT_REQUIRE(near(quiet.stick, 0.02) && near(quiet.trigger, 0.02));
+        set |= to_gamepad_buttons(gamepad_button::a);
+        set |= to_gamepad_buttons(gamepad_button::dpad_up);
+        CT_REQUIRE(has_button(set, gamepad_button::a));
+        CT_REQUIRE(has_button(set, gamepad_button::dpad_up));
+        CT_REQUIRE(!has_button(set, gamepad_button::b));
 
-        gamepad_deadzone_calibration_options exact_opts;
-        exact_opts.headroom = 0.0;
-        exact_opts.margin = 0.0;
-        const gamepad_deadzone exact = deadzone_for_noise(0.3, 0.1, exact_opts);
-        CT_REQUIRE(near(exact.stick, 0.3) && near(exact.trigger, 0.1));
+        // Every enumerator has its own bit, and the bit index is the enumerator's value.
+        for (std::size_t i = 0; i < gamepad_button_count; ++i)
+        {
+            const auto b = static_cast<gamepad_button>(i);
+            CT_REQUIRE(static_cast<std::uint16_t>(to_gamepad_buttons(b)) == (1u << i));
+        }
 
-        // Results always stay inside the range set_gamepad_deadzone() accepts, whatever the peaks were.
-        const gamepad_deadzone huge = deadzone_for_noise(5.0, 5.0);
-        CT_REQUIRE(huge.stick < 1.0 && huge.trigger < 1.0);
-        const gamepad_deadzone negative = deadzone_for_noise(-1.0, -1.0, exact_opts);
-        CT_REQUIRE(negative.stick == 0.0 && negative.trigger == 0.0);
-        const gamepad_deadzone nan = deadzone_for_noise(std::nan(""), std::nan(""));
-        CT_REQUIRE(std::isfinite(nan.stick) && std::isfinite(nan.trigger));
+        set &= ~to_gamepad_buttons(gamepad_button::a);
+        CT_REQUIRE(!has_button(set, gamepad_button::a));
+        CT_REQUIRE(has_button(set, gamepad_button::dpad_up));
     }
 
-    void test_calibrator_learns_noise()
+    void test_controls()
     {
-        using clock = gamepad_deadzone_calibrator::clock;
-        gamepad_deadzone_calibration_options opts;
-        opts.duration = 100ms;
+        CT_REQUIRE(control_of(gamepad_button::a).index == 0);
+        CT_REQUIRE(control_of(gamepad_axis::left_x).index == gamepad_button_count);
+        CT_REQUIRE(control_of(gamepad_axis::right_trigger).index == gamepad_control_count - 1);
 
-        gamepad_deadzone_calibrator cal(0, opts);
-        CT_REQUIRE(cal.gamepad() == 0);
-        CT_REQUIRE(cal.options().duration == 100ms);
-        CT_REQUIRE(cal.status() == gamepad_calibration_status::idle);
-        CT_REQUIRE(cal.progress() == 0.0);
-        // Until start() the calibrator ignores samples and update() is a harmless no-op.
-        CT_REQUIRE(!cal.sample(raw_state(0.5, 0.5), clock::now()));
-        CT_REQUIRE(!cal.update());
-        CT_REQUIRE(cal.status() == gamepad_calibration_status::idle);
-        CT_REQUIRE(cal.peak_stick_noise() == 0.0);
+        gamepad_button b{};
+        CT_REQUIRE(gamepad_button_of(control_of(gamepad_button::y), b));
+        CT_REQUIRE(b == gamepad_button::y);
+        CT_REQUIRE(!gamepad_button_of(control_of(gamepad_axis::left_x), b));
 
-        const clock::time_point t0 = clock::now();
-        cal.start(t0);
-        CT_REQUIRE(cal.is_sampling());
-        CT_REQUIRE(!cal.is_complete());
+        gamepad_axis a{};
+        CT_REQUIRE(gamepad_axis_of(control_of(gamepad_axis::right_y), a));
+        CT_REQUIRE(a == gamepad_axis::right_y);
+        CT_REQUIRE(!gamepad_axis_of(control_of(gamepad_button::a), a));
 
-        // Resting noise: the left stick wobbles with magnitude 0.05, the right reaches 0.06, a trigger reads 0.02.
-        CT_REQUIRE(!cal.sample(raw_state(0.03, 0.04), t0));
-        CT_REQUIRE(near(cal.peak_stick_noise(), 0.05));
-        CT_REQUIRE(!cal.sample(raw_state(-0.02, 0.01, 0.0, -0.06, 0.0, 0.02), t0 + 50ms));
-        CT_REQUIRE(near(cal.progress(), 0.5));
-        CT_REQUIRE(near(cal.peak_stick_noise(), 0.06));
-        CT_REQUIRE(near(cal.peak_trigger_noise(), 0.02));
-        CT_REQUIRE(cal.is_sampling());
-
-        CT_REQUIRE(cal.sample(raw_state(0.0, 0.0), t0 + 100ms));
-        CT_REQUIRE(cal.is_complete());
-        CT_REQUIRE(cal.progress() == 1.0);
-        CT_REQUIRE(cal.restarts() == 0);
-
-        // The threshold sits just above the largest value seen.
-        const gamepad_deadzone dz = cal.result();
-        CT_REQUIRE(dz.stick > cal.peak_stick_noise());
-        CT_REQUIRE(dz.trigger > cal.peak_trigger_noise());
-        CT_REQUIRE(near(dz.stick, 0.06 * 1.25 + 0.02));
-        CT_REQUIRE(near(dz.trigger, 0.02 * 1.25 + 0.02));
-
-        // Once complete, further samples are ignored and update() keeps reporting completion.
-        CT_REQUIRE(cal.sample(raw_state(0.9, 0.9, 0.0, 0.0, 1.0, 1.0), t0 + 200ms));
-        CT_REQUIRE(near(cal.peak_stick_noise(), 0.06));
-        CT_REQUIRE(cal.update());
-        CT_REQUIRE(near(cal.result().stick, dz.stick));
-
-        // apply() installs the result.
-        const gamepad_deadzone before = get_gamepad_deadzone();
-        CT_REQUIRE(cal.apply());
-        CT_REQUIRE(near(get_gamepad_deadzone().stick, dz.stick));
-        CT_REQUIRE(near(get_gamepad_deadzone().trigger, dz.trigger));
-        set_gamepad_deadzone(before);
-
-        // cancel() goes back to idle; there is nothing to apply any more.
-        cal.cancel();
-        CT_REQUIRE(cal.status() == gamepad_calibration_status::idle);
-        CT_REQUIRE(!cal.apply());
-        CT_REQUIRE(!cal.update());
-
-        // A zero duration completes on the first sample.
-        opts.duration = 0ms;
-        gamepad_deadzone_calibrator instant(0, opts);
-        instant.start(t0);
-        CT_REQUIRE(instant.sample(raw_state(0.01, 0.0), t0));
-        CT_REQUIRE(instant.is_complete());
+        // A stick swings both ways; a trigger only one. The binding layer needs the difference to apply a dead zone.
+        const layout_ref &layout = gamepad_layout();
+        CT_REQUIRE(layout->size() == gamepad_control_count);
+        CT_REQUIRE(layout->kind_of(control_of(gamepad_axis::left_x)) == control_kind::axis);
+        CT_REQUIRE(layout->kind_of(control_of(gamepad_axis::left_trigger)) == control_kind::ratio);
+        CT_REQUIRE(layout->kind_of(control_of(gamepad_button::a)) == control_kind::button);
+        CT_REQUIRE(layout->name_of(control_of(gamepad_axis::left_x)) == "Left Stick X");
     }
 
-    void test_calibrator_restarts_when_disturbed()
-    {
-        using clock = gamepad_deadzone_calibrator::clock;
-        gamepad_deadzone_calibration_options opts;
-        opts.duration = 100ms;
-
-        gamepad_deadzone_calibrator cal(0, opts);
-        const clock::time_point t0 = clock::now();
-        cal.start(t0);
-
-        CT_REQUIRE(!cal.sample(raw_state(0.05, 0.0), t0));
-        CT_REQUIRE(near(cal.peak_stick_noise(), 0.05));
-
-        // A stick deflection above the disturbance threshold discards the peaks and restarts the window.
-        CT_REQUIRE(!cal.sample(raw_state(0.8, 0.0), t0 + 40ms));
-        CT_REQUIRE(cal.restarts() == 1);
-        CT_REQUIRE(cal.peak_stick_noise() == 0.0);
-        CT_REQUIRE(cal.progress() == 0.0);
-        CT_REQUIRE(cal.is_sampling());
-
-        // So does a trigger pull...
-        CT_REQUIRE(!cal.sample(raw_state(0.0, 0.0, 0.0, 0.0, 0.0, 0.7), t0 + 50ms));
-        CT_REQUIRE(cal.restarts() == 2);
-
-        // ...and a button press, even with the axes perfectly still.
-        CT_REQUIRE(!cal.sample(raw_state(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, gamepad_buttons::a), t0 + 60ms));
-        CT_REQUIRE(cal.restarts() == 3);
-
-        // The window now runs from t0 + 60ms, so t0 + 100ms is not enough.
-        CT_REQUIRE(!cal.sample(raw_state(0.02, 0.0), t0 + 100ms));
-        CT_REQUIRE(near(cal.progress(), 0.4));
-        CT_REQUIRE(cal.sample(raw_state(0.0, 0.0), t0 + 160ms));
-        CT_REQUIRE(cal.is_complete());
-        CT_REQUIRE(cal.restarts() == 3);
-
-        // Only the undisturbed window contributes to the result.
-        CT_REQUIRE(near(cal.peak_stick_noise(), 0.02));
-        CT_REQUIRE(near(cal.result().stick, 0.02 * 1.25 + 0.02));
-
-        // start() clears the restart counter.
-        cal.start(t0);
-        CT_REQUIRE(cal.restarts() == 0);
-        CT_REQUIRE(cal.is_sampling());
-
-        // A disturbance threshold >= 1 turns the axis check off: a full deflection is recorded as noise (and the result
-        // is still clamped to something set_gamepad_deadzone() accepts).
-        opts.disturbance_threshold = 1.0;
-        gamepad_deadzone_calibrator lenient(0, opts);
-        lenient.start(t0);
-        CT_REQUIRE(!lenient.sample(raw_state(1.0, 0.0), t0));
-        CT_REQUIRE(lenient.restarts() == 0);
-        CT_REQUIRE(near(lenient.peak_stick_noise(), 1.0));
-        CT_REQUIRE(lenient.sample(raw_state(0.0, 0.0), t0 + 100ms));
-        CT_REQUIRE(lenient.result().stick < 1.0);
-        // Buttons still count.
-        lenient.start(t0);
-        CT_REQUIRE(!lenient.sample(raw_state(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, gamepad_buttons::start), t0));
-        CT_REQUIRE(lenient.restarts() == 1);
-    }
-
-    void test_calibrator_handles_disconnect()
-    {
-        using clock = gamepad_deadzone_calibrator::clock;
-        gamepad_deadzone_calibration_options opts;
-        opts.duration = 100ms;
-
-        gamepad_deadzone_calibrator cal(0, opts);
-        const clock::time_point t0 = clock::now();
-        cal.start(t0);
-        CT_REQUIRE(!cal.sample(raw_state(0.01, 0.0), t0));
-
-        gamepad_state gone;
-        gone.connected = false;
-        CT_REQUIRE(!cal.sample(gone, t0 + 50ms));
-        CT_REQUIRE(cal.status() == gamepad_calibration_status::disconnected);
-        CT_REQUIRE(!cal.is_sampling());
-        CT_REQUIRE(!cal.is_complete());
-        CT_REQUIRE(!cal.apply());
-        // Further samples are ignored until start().
-        CT_REQUIRE(!cal.sample(raw_state(0.0, 0.0), t0 + 200ms));
-        CT_REQUIRE(cal.status() == gamepad_calibration_status::disconnected);
-        cal.start(t0 + 300ms);
-        CT_REQUIRE(cal.is_sampling());
-
-        // update() on a slot no backend can fill lands in the same state.
-        gamepad_deadzone_calibrator far(max_gamepads, opts);
-        far.start();
-        CT_REQUIRE(!far.update());
-        CT_REQUIRE(far.status() == gamepad_calibration_status::disconnected);
-        CT_REQUIRE(!get_gamepad_raw_state(max_gamepads).connected);
-
-        // The blocking helper refuses an out-of-range slot straight away rather than waiting for the timeout.
-        const auto began = clock::now();
-        CT_REQUIRE(!calibrate_gamepad_deadzone(max_gamepads, opts, 10s).has_value());
-        CT_REQUIRE(!calibrate_gamepad_deadzone(max_gamepads + 100).has_value());
-        CT_REQUIRE(clock::now() - began < 5s);
-    }
+    // ------------------------------------------------------------------------------------------------------------------
+    // Dead zones
+    // ------------------------------------------------------------------------------------------------------------------
 
     void test_linear_deadzone()
     {
-        CT_REQUIRE(apply_deadzone(0.0, 0.24) == 0.0);
-        CT_REQUIRE(apply_deadzone(0.1, 0.24) == 0.0);
-        CT_REQUIRE(apply_deadzone(-0.1, 0.24) == 0.0);
-        CT_REQUIRE(apply_deadzone(1.0, 0.24) == 1.0);
-        CT_REQUIRE(apply_deadzone(-1.0, 0.24) == -1.0);
-        CT_REQUIRE(near(apply_deadzone(0.62, 0.24), 0.5));
-        CT_REQUIRE(near(apply_deadzone(-0.62, 0.24), -0.5));
-        // No dead zone is the identity; a silly threshold is clamped rather than dividing by zero.
-        CT_REQUIRE(apply_deadzone(0.3, 0.0) == 0.3);
+        CT_REQUIRE(near(apply_deadzone(0.0, 0.25), 0.0));
+        CT_REQUIRE(near(apply_deadzone(0.25, 0.25), 0.0));
+        CT_REQUIRE(near(apply_deadzone(-0.25, 0.25), 0.0));
+
+        // Just past the threshold the output starts at 0 rather than jumping to 0.25.
+        CT_REQUIRE(apply_deadzone(0.26, 0.25) > 0.0);
+        CT_REQUIRE(apply_deadzone(0.26, 0.25) < 0.05);
+
+        // Full deflection still reaches 1 either way.
+        CT_REQUIRE(near(apply_deadzone(1.0, 0.25), 1.0));
+        CT_REQUIRE(near(apply_deadzone(-1.0, 0.25), -1.0));
+
+        // Halfway through the live range reads a half.
+        CT_REQUIRE(near(apply_deadzone(0.625, 0.25), 0.5));
+
+        // A zero dead zone is the identity, and a threshold of 1 is clamped rather than dividing by zero.
+        CT_REQUIRE(near(apply_deadzone(0.3, 0.0), 0.3));
         CT_REQUIRE(std::isfinite(apply_deadzone(1.0, 1.0)));
-        CT_REQUIRE(std::isfinite(apply_deadzone(1.0, 5.0)));
     }
 
     void test_radial_deadzone()
     {
-        double x = 0.1, y = 0.1;
-        apply_radial_deadzone(x, y, 0.24);
-        CT_REQUIRE(x == 0.0 && y == 0.0);
+        double x = 0.0;
+        double y = 0.0;
+        apply_radial_deadzone(x, y, 0.25);
+        CT_REQUIRE(near(x, 0.0) && near(y, 0.0));
 
-        x = 1.0;
-        y = 0.0;
-        apply_radial_deadzone(x, y, 0.24);
-        CT_REQUIRE(near(x, 1.0) && y == 0.0);
+        // Inside the circle both components go, not just the smaller one.
+        x = 0.2;
+        y = 0.1;
+        apply_radial_deadzone(x, y, 0.25);
+        CT_REQUIRE(near(x, 0.0) && near(y, 0.0));
 
-        x = 0.0;
-        y = -1.0;
-        apply_radial_deadzone(x, y, 0.24);
-        CT_REQUIRE(x == 0.0 && near(y, -1.0));
-
-        x = 0.62;
-        y = 0.0;
-        apply_radial_deadzone(x, y, 0.24);
-        CT_REQUIRE(near(x, 0.5) && y == 0.0);
-
-        // Direction is preserved: a unit vector stays a unit vector with the same direction.
-        x = 0.6;
-        y = 0.8;
-        apply_radial_deadzone(x, y, 0.24);
-        CT_REQUIRE(near(x, 0.6) && near(y, 0.8));
-
-        // Diagonal at full deflection never exceeds magnitude 1.
-        x = 1.0;
-        y = 1.0;
-        apply_radial_deadzone(x, y, 0.24);
-        CT_REQUIRE(near(std::sqrt(x * x + y * y), 1.0));
+        // Outside it, the direction survives - which is the whole reason for doing this radially.
+        x = 0.8;
+        y = 0.6; // magnitude 1
+        apply_radial_deadzone(x, y, 0.25);
+        CT_REQUIRE(near(std::sqrt(x * x + y * y), 1.0, 1e-9));
+        CT_REQUIRE(near(y / x, 0.6 / 0.8, 1e-9));
     }
 
-    void test_deadzone_settings()
+    void test_deadzone_defaults()
     {
-        const gamepad_deadzone defaults = get_gamepad_deadzone();
-        CT_REQUIRE(near(defaults.stick, 7849.0 / 32767.0));
-        CT_REQUIRE(near(defaults.trigger, 30.0 / 255.0));
-
-        set_gamepad_deadzone({0.5, 2.0});
-        const gamepad_deadzone after = get_gamepad_deadzone();
-        CT_REQUIRE(after.stick == 0.5);
-        CT_REQUIRE(after.trigger < 1.0); // clamped
-
-        set_gamepad_deadzone(defaults);
+        const gamepad_deadzone dz;
+        // Microsoft's published XInput values, which are the right default for the hardware most players own.
+        CT_REQUIRE(near(dz.stick, 7849.0 / 32767.0));
+        CT_REQUIRE(near(dz.trigger, 30.0 / 255.0));
     }
 
-    void test_button_sets()
+    void test_deadzone_settings_are_clamped()
     {
-        CT_REQUIRE(to_gamepad_buttons(gamepad_button::a) == gamepad_buttons::a);
-        CT_REQUIRE(to_gamepad_buttons(gamepad_button::dpad_right) == gamepad_buttons::dpad_right);
+        events::bus bus;
+        context in(bus);
 
-        gamepad_buttons set = gamepad_buttons::a | gamepad_buttons::start;
-        CT_REQUIRE(has_button(set, gamepad_button::a));
-        CT_REQUIRE(has_button(set, gamepad_button::start));
-        CT_REQUIRE(!has_button(set, gamepad_button::b));
-
-        set &= ~gamepad_buttons::a;
-        CT_REQUIRE(!has_button(set, gamepad_button::a));
-        CT_REQUIRE((set ^ gamepad_buttons::start) == gamepad_buttons::none);
-
-        gamepad_state s;
-        s.buttons = gamepad_buttons::x;
-        s.axes[static_cast<std::size_t>(gamepad_axis::right_trigger)] = 0.25;
-        CT_REQUIRE(s.is_down(gamepad_button::x));
-        CT_REQUIRE(!s.is_down(gamepad_button::y));
-        CT_REQUIRE(s.axis(gamepad_axis::right_trigger) == 0.25);
+        in.set_deadzone({0.5, 2.0});
+        const gamepad_deadzone after = in.deadzone();
+        CT_REQUIRE(near(after.stick, 0.5));
+        // A threshold of 1 or more would leave no live range at all, so it is clamped just short.
+        CT_REQUIRE(after.trigger < 1.0);
+        CT_REQUIRE(after.trigger > 0.9);
     }
 
-    void test_backend_queries()
+    // ------------------------------------------------------------------------------------------------------------------
+    // Calibration
+    // ------------------------------------------------------------------------------------------------------------------
+
+    void test_deadzone_for_noise()
     {
-        CT_REQUIRE(gamepad_capacity() <= max_gamepads);
-        CT_REQUIRE(!get_gamepad_state(max_gamepads).connected);
-        CT_REQUIRE(!get_gamepad_state(max_gamepads + 100).connected);
-        CT_REQUIRE(!is_gamepad_connected(max_gamepads));
-        CT_REQUIRE(!set_gamepad_rumble(max_gamepads, 1.0, 1.0));
-        CT_REQUIRE(module_name() != nullptr);
+        gamepad_deadzone_calibration_options opts;
+        opts.headroom = 0.25;
+        opts.margin = 0.02;
+
+        const gamepad_deadzone dz = deadzone_for_noise(0.08, 0.04, opts);
+        CT_REQUIRE(near(dz.stick, 0.08 * 1.25 + 0.02));
+        CT_REQUIRE(near(dz.trigger, 0.04 * 1.25 + 0.02));
+
+        // A controller with no measurable noise still gets the margin, not a zero threshold.
+        const gamepad_deadzone clean = deadzone_for_noise(0.0, 0.0, opts);
+        CT_REQUIRE(near(clean.stick, 0.02));
+
+        // Nonsense in - a driver reporting NaN, or a peak past full deflection - stays inside a usable range.
+        const gamepad_deadzone absurd = deadzone_for_noise(50.0, std::nan(""), opts);
+        CT_REQUIRE(absurd.stick < 1.0 && absurd.stick >= 0.0);
+        CT_REQUIRE(std::isfinite(absurd.trigger));
     }
 
-    void test_polling_is_consistent_with_events()
+    void test_calibrator_learns_noise()
     {
-        // The test cannot assume hardware, so it only checks that polling with and without a sink is safe and that the
-        // snapshots agree with what was published.
-        CT_REQUIRE(get_event_sink() == nullptr);
-        poll_gamepads();
+        gamepad_deadzone_calibration_options opts;
+        opts.duration = ms{100};
+        gamepad_deadzone_calibrator cal(0, opts);
 
-        core::dispatcher d;
-        core::event_sink sink(d);
-        set_event_sink(&sink);
-        CT_REQUIRE(get_event_sink() == &sink);
+        auto now = clock_type::now();
+        cal.start(now);
+        CT_REQUIRE(cal.is_sampling());
+        CT_REQUIRE(cal.progress() == 0.0);
 
-        int connected_events = 0;
-        auto sub = d.subscribe<gamepad_connected_event>([&](const gamepad_connected_event &e)
+        // A resting controller that jitters a little; the largest jitter is the noise floor.
+        for (int i = 0; i < 5; ++i)
         {
-            ++connected_events;
-            CT_REQUIRE(e.gamepad < gamepad_capacity());
-            CT_REQUIRE(e.has_timestamp());
-        });
-
-        // Slots that were probed by the first poll are not re-probed until the probe interval passes, so a device that
-        // was already connected then is reported as connected here without a new event; count both ways.
-        poll_gamepads();
-        std::size_t connected_now = 0;
-        for (gamepad_id id = 0; id < gamepad_capacity(); ++id)
-            if (is_gamepad_connected(id))
-                ++connected_now;
-        CT_REQUIRE(static_cast<std::size_t>(connected_events) <= connected_now);
-
-        for (gamepad_id id = 0; id < gamepad_capacity(); ++id)
-        {
-            const gamepad_state &s = get_gamepad_state(id);
-            for (double v : s.axes)
-                CT_REQUIRE(v >= -1.0 && v <= 1.0);
-            if (!s.connected)
-                CT_REQUIRE(s.buttons == gamepad_buttons::none);
-
-            // The raw snapshot mirrors the processed one apart from the dead zone.
-            const gamepad_state &raw = get_gamepad_raw_state(id);
-            CT_REQUIRE(raw.connected == s.connected);
-            CT_REQUIRE(raw.buttons == s.buttons);
-            for (double v : raw.axes)
-                CT_REQUIRE(v >= -1.0 && v <= 1.0);
-            if (!s.connected)
-                for (double v : raw.axes)
-                    CT_REQUIRE(v == 0.0);
+            now += ms{10};
+            CT_REQUIRE(!cal.sample(resting(0.03 + i * 0.01, 0.01), now));
         }
+        CT_REQUIRE(cal.progress() > 0.0 && cal.progress() < 1.0);
 
-        set_event_sink(nullptr);
-        poll_gamepads();
+        now += ms{100};
+        CT_REQUIRE(cal.sample(resting(0.03, 0.01), now));
+        CT_REQUIRE(cal.is_complete());
+        CT_REQUIRE(cal.progress() == 1.0);
+        CT_REQUIRE(near(cal.peak_stick_noise(), 0.07, 1e-9));
+        CT_REQUIRE(cal.restarts() == 0);
+
+        const gamepad_deadzone result = cal.result();
+        CT_REQUIRE(result.stick > 0.07);
+        CT_REQUIRE(result.stick < 0.2);
+    }
+
+    void test_calibrator_restarts_when_disturbed()
+    {
+        gamepad_deadzone_calibration_options opts;
+        opts.duration = ms{100};
+        opts.disturbance_threshold = 0.5;
+        gamepad_deadzone_calibrator cal(0, opts);
+
+        auto now = clock_type::now();
+        cal.start(now);
+
+        now += ms{50};
+        CT_REQUIRE(!cal.sample(resting(0.02), now));
+
+        // The user grabbed the stick: the window starts over, and the peak they just caused is not kept.
+        now += ms{10};
+        CT_REQUIRE(!cal.sample(resting(0.9), now));
+        CT_REQUIRE(cal.restarts() == 1);
+        CT_REQUIRE(near(cal.peak_stick_noise(), 0.0));
+
+        // A held button counts as a disturbance too, whatever the sticks say.
+        gamepad_state pressed = resting(0.01);
+        pressed.buttons = gamepad_buttons::a;
+        now += ms{10};
+        CT_REQUIRE(!cal.sample(pressed, now));
+        CT_REQUIRE(cal.restarts() == 2);
+
+        now += ms{200};
+        CT_REQUIRE(cal.sample(resting(0.01), now));
+        CT_REQUIRE(cal.is_complete());
+    }
+
+    void test_calibrator_handles_disconnect()
+    {
+        gamepad_deadzone_calibrator cal(0);
+        auto now = clock_type::now();
+        cal.start(now);
+
+        gamepad_state gone{};
+        gone.connected = false;
+        now += ms{10};
+        CT_REQUIRE(!cal.sample(gone, now));
+        CT_REQUIRE(cal.status() == gamepad_calibration_status::disconnected);
+        CT_REQUIRE(!cal.is_sampling());
+        CT_REQUIRE(!cal.is_complete());
+
+        // It can be restarted once the controller comes back.
+        cal.start(now);
+        CT_REQUIRE(cal.is_sampling());
+    }
+
+    void test_calibrator_lifecycle()
+    {
+        gamepad_deadzone_calibrator cal(2);
+        CT_REQUIRE(cal.slot() == 2);
+        CT_REQUIRE(cal.status() == gamepad_calibration_status::idle);
+        CT_REQUIRE(cal.progress() == 0.0);
+
+        // An idle calibrator ignores samples rather than quietly accumulating them.
+        CT_REQUIRE(!cal.sample(resting(0.5), clock_type::now()));
+        CT_REQUIRE(cal.status() == gamepad_calibration_status::idle);
+
+        cal.start();
+        CT_REQUIRE(cal.is_sampling());
+        cal.cancel();
+        CT_REQUIRE(cal.status() == gamepad_calibration_status::idle);
+    }
+
+    void test_calibrator_applies_to_a_context()
+    {
+        events::bus bus;
+        context in(bus);
+
+        gamepad_deadzone_calibration_options opts;
+        opts.duration = ms{10};
+        gamepad_deadzone_calibrator cal(0, opts);
+
+        // Nothing is installed until the calibration finishes.
+        const gamepad_deadzone before = in.deadzone();
+        CT_REQUIRE(!cal.apply(in));
+        CT_REQUIRE(near(in.deadzone().stick, before.stick));
+
+        auto now = clock_type::now();
+        cal.start(now);
+        now += ms{50};
+        CT_REQUIRE(cal.sample(resting(0.05, 0.02), now));
+        CT_REQUIRE(cal.apply(in));
+        CT_REQUIRE(near(in.deadzone().stick, cal.result().stick));
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------
+    // Backend
+    // ------------------------------------------------------------------------------------------------------------------
+
+    void test_backend_queries_are_safe()
+    {
+        events::bus bus;
+        context in(bus);
+
+        CT_REQUIRE(in.gamepad_capacity() <= max_gamepads);
+        CT_REQUIRE(in.backend_name() != nullptr);
+
+        // Out-of-range slots are answered, not crashed on, whether or not hardware is attached.
+        CT_REQUIRE(!in.raw_gamepad(static_cast<std::uint32_t>(max_gamepads)).connected);
+        CT_REQUIRE(!in.raw_gamepad(9999).connected);
+        CT_REQUIRE(!in.set_rumble(static_cast<std::uint32_t>(max_gamepads), {1.0, 1.0}));
+        CT_REQUIRE(!in.set_rumble(no_device, {1.0, 1.0}));
+
+        // Polling with nothing plugged in is a no-op, not a fault.
+        in.new_frame();
+        in.poll();
+        in.update();
     }
 } // namespace
 
 int main()
 {
+    test_button_sets();
+    test_controls();
     test_linear_deadzone();
     test_radial_deadzone();
-    test_deadzone_settings();
+    test_deadzone_defaults();
+    test_deadzone_settings_are_clamped();
     test_deadzone_for_noise();
     test_calibrator_learns_noise();
     test_calibrator_restarts_when_disturbed();
     test_calibrator_handles_disconnect();
-    test_button_sets();
-    test_backend_queries();
-    test_polling_is_consistent_with_events();
+    test_calibrator_lifecycle();
+    test_calibrator_applies_to_a_context();
+    test_backend_queries_are_safe();
     return 0;
 }

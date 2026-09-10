@@ -1,8 +1,15 @@
 add_library(catalyst_input STATIC
-  input.cpp
+  action.cpp
+  action_map.cpp
+  binding.cpp
+  calibration.cpp
+  device.cpp
   gamepad.cpp
+  input.cpp
   keyboard.cpp
+  registry.cpp
   state.cpp
+  context.cpp
 )
 
 add_library(catalyst::input ALIAS catalyst_input)
@@ -13,9 +20,11 @@ target_include_directories(catalyst_input
     $<INSTALL_INTERFACE:include>
 )
 
-# input_state subscribes to a core::dispatcher, so consumers of the input module need the core module's objects too.
-if(TARGET catalyst_core)
-  target_link_libraries(catalyst_input PUBLIC catalyst_core)
+# The module publishes to a catalyst::events::bus and describes positions with catalyst::math vectors. Both are
+# header-only, so this is an include dependency rather than a link one - but math has a compiled target, and linking it
+# when it is being built keeps the dependency visible to consumers.
+if(TARGET catalyst_math)
+  target_link_libraries(catalyst_input PUBLIC catalyst_math)
 endif()
 
 set(CATALYST_INPUT_BACKEND "auto" CACHE STRING "Input backend (auto|win32|null)")

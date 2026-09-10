@@ -2,7 +2,8 @@
 
 #include <catalyst/input/keyboard.hpp>
 #include <catalyst/input/mouse.hpp>
-#include <catalyst/input/usb.hpp>
+#include <catalyst/input/hid.hpp>
+#include <catalyst/input/text.hpp>
 
 #include <string_view>
 #include <type_traits>
@@ -124,12 +125,39 @@ namespace
         CT_REQUIRE(copy.text() == U"xyz");
     }
 
-    void test_event_type_ids_are_distinct()
+    void test_event_tags_are_distinct()
     {
-        CT_REQUIRE(key_event::type_id() != text_input_event::type_id());
-        CT_REQUIRE(mouse_move_event::type_id() != mouse_button_event::type_id());
-        CT_REQUIRE(mouse_wheel_event::type_id() != mouse_raw_move_event::type_id());
-        CT_REQUIRE(mouse_enter_event::type_id() != mouse_leave_event::type_id());
+        // Every input event carries a static tag so the bus dispatches on a constant rather than typeid. Two events
+        // sharing one would silently deliver each to the other's listeners.
+        static_assert(key_event::tag != text_input_event::tag);
+        static_assert(mouse_move_event::tag != mouse_button_event::tag);
+        static_assert(mouse_wheel_event::tag != mouse_raw_move_event::tag);
+        static_assert(mouse_enter_event::tag != mouse_leave_event::tag);
+
+        // ... and every one of them is inside the block this module owns.
+        static_assert(key_event::tag >= tags::input_base);
+        static_assert(key_event::tag < tags::input_base + 0x1'0000u);
+    }
+
+    void test_key_controls_round_trip()
+    {
+        // A key's control slot is its HID usage id, which is what lets a keyboard layout be a flat array.
+        CT_REQUIRE(control_of(key_code::a).index == 4);
+        CT_REQUIRE(control_of(key_code::unknown) == no_control);
+        CT_REQUIRE(key_of(control_of(key_code::space)) == key_code::space);
+        CT_REQUIRE(key_of(no_control) == key_code::unknown);
+
+        for (std::uint16_t v = 4; v <= 231; ++v)
+        {
+            const auto code = static_cast<key_code>(v);
+            CT_REQUIRE(key_of(control_of(code)) == code);
+        }
+
+        const layout_ref &layout = keyboard_layout();
+        CT_REQUIRE(layout->size() == key_code_count);
+        CT_REQUIRE(layout->kind() == device_kind::keyboard);
+        CT_REQUIRE(layout->name_of(control_of(key_code::a)) == "A");
+        CT_REQUIRE(layout->kind_of(control_of(key_code::a)) == control_kind::button);
     }
 
     void test_mouse_button_sets()
@@ -163,7 +191,8 @@ int main()
     test_modifier_flags();
     test_key_names();
     test_text_input_event();
-    test_event_type_ids_are_distinct();
+    test_event_tags_are_distinct();
+    test_key_controls_round_trip();
     test_mouse_button_sets();
     return 0;
 }

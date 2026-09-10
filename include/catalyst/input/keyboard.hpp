@@ -14,8 +14,7 @@
 #include <string_view>
 #include <type_traits>
 
-#include "catalyst/core/event.hpp"
-#include "catalyst/input/usb.hpp"
+#include <catalyst/input/device.hpp>
 
 /**
  * @namespace catalyst::input
@@ -24,13 +23,6 @@
  */
 namespace catalyst::input
 {
-
-    /**
-     * @typedef character_code
-     * @brief A type alias for char32_t, representing a Unicode code point for character input. This type is used for handling text input events separately from physical key presses, allowing for proper representation of characters that may be produced by various key combinations, keyboard layouts, and modifier keys. By using char32_t, we can support a wide range of Unicode characters, including those outside the Basic Multilingual Plane (BMP), ensuring that text input can be accurately represented regardless of the language or character set being used.
-     * @details The character_code type alias is defined as char32_t, which is a fixed-width character type capable of representing any Unicode code point. This allows for proper handling of text input events that may produce characters from various languages and scripts, including those that require multiple bytes to represent. By using character_code for text input events, we can ensure that the resulting text can be accurately represented and processed, regardless of the specific keys pressed or the keyboard layout in use. This separation of physical key codes and character codes allows for greater flexibility in handling user input and ensures that text input can be properly managed in a wide range of applications.
-     */
-    using character_code = char32_t;
 
     /**
      * @enum key_code
@@ -268,18 +260,6 @@ namespace catalyst::input
     }
 
     /**
-     * @enum key_action
-     * @brief An enumeration representing the type of action performed on a key, such as pressing, releasing, or repeating a key. This enumeration is used in key events to indicate the specific action that occurred with a key press, allowing for proper handling of different types of key interactions in applications. By distinguishing between key actions, developers can implement features such as key repeat behavior, handling of key releases, and differentiation between initial key presses and repeated key events.
-     * @details The key_action enumeration includes values for press, release, and repeat actions. The press action indicates that a key has been pressed down, the release action indicates that a key has been released, and the repeat action indicates that a key is being held down and is generating repeated events. By using this enumeration in key events, developers can implement features such as key repeat behavior, handling of key releases, and differentiation between initial key presses and repeated key events, allowing for more responsive and intuitive input handling in applications.
-     */
-    enum class key_action : std::uint8_t
-    {
-        press,
-        release,
-        repeat
-    };
-
-    /**
      * @enum key_modifiers
      * @brief An enumeration representing modifier keys that can be held down in combination with other keys, such as shift, control, alt, super, caps lock, and num lock. This enumeration is used in key events to indicate which modifier keys are active at the time of a key press, allowing for proper handling of key combinations and modified input in applications. By using this enumeration, developers can easily check for specific modifier keys being held down and implement features such as keyboard shortcuts, modified character input, and special behavior based on active modifiers.
      * @details The key_modifiers enumeration includes values for common modifier keys such as shift, control, alt, super (often the Windows or Command key), caps lock, and num lock. The none value indicates that no modifiers are active. By using this enumeration in key events, developers can easily check for specific modifier keys being held down and implement features such as keyboard shortcuts (e.g., Ctrl+C for copy), modified character input (e.g., Shift+1 for '!'), and special behavior based on active modifiers (e.g., Caps Lock affecting letter case), allowing for more versatile and user-friendly input handling in applications.
@@ -397,93 +377,74 @@ namespace catalyst::input
     {
         return (value & flag) != key_modifiers::none;
     }
+
+    // ------------------------------------------------------------------------------------------------------------------
+    // Controls
+    // ------------------------------------------------------------------------------------------------------------------
+
+    /**
+     * @fn control_of
+     * @brief The control slot a key occupies on a keyboard device. Slot index == USB HID usage id, so the layout is the
+     * HID keyboard page laid out flat and `from_usb_hid(make_usb_hid(page_keyboard, slot))` recovers the key.
+     * @param code The key.
+     * @return Its slot, or no_control for key_code::unknown.
+     */
+    [[nodiscard]] inline constexpr control_id control_of(key_code code) noexcept
+    {
+        return code == key_code::unknown ? no_control : control_at(static_cast<std::size_t>(code));
+    }
+
+    /**
+     * @fn key_of
+     * @brief The inverse of control_of(): the key a keyboard slot belongs to, or key_code::unknown.
+     */
+    [[nodiscard]] inline constexpr key_code key_of(control_id control) noexcept
+    {
+        if (!control.valid() || control.index >= key_code_count || control.index == 0)
+            return key_code::unknown;
+        return static_cast<key_code>(control.index);
+    }
+
+    /**
+     * @fn keyboard_layout
+     * @brief The layout every keyboard device shares: key_code_count button controls, named by key_name().
+     * @details Returned by reference to a function-local static, so it is built once, on first use, and every keyboard
+     * device points at the same object.
+     */
+    [[nodiscard]] const layout_ref &keyboard_layout();
+
+    // ------------------------------------------------------------------------------------------------------------------
+    // Events
+    // ------------------------------------------------------------------------------------------------------------------
+
     /**
      * @struct key_event
-     * @brief Published for every physical key press, auto-repeat and release delivered to a Catalyst window. Key events
-     * describe *physical* keys (see key_code); use text_input_event for the characters the user actually typed.
-     * @details The event carries the window that had keyboard focus, the layout-independent key_code, the platform's raw
-     * scan code (useful for displaying localised key names via the OS), the action and the modifier state sampled at the
-     * time of the event. When a window loses focus the platform publishes a release for every key it still considers
-     * held, so consumers never see a key stuck in the pressed state.
+     * @brief One physical key press, auto-repeat or release. Key events describe *physical* keys (see key_code); for the
+     * characters the user actually typed, listen for text_input_event instead (see text.hpp).
+     * @details When a window loses focus the platform layer synthesises a release for every key it still considers held,
+     * so no consumer is left with a key stuck down.
      */
-    struct key_event : public core::event<key_event>
+    struct key_event : device_event<tags::key>
     {
-        /** @brief The platform::window_id of the window that received the key. */
+        /** @brief The platform::window_id of the window that had keyboard focus, or 0 if there was none. */
         std::uint64_t window{0};
         /** @brief The physical key, or key_code::unknown if the platform could not map it. */
         key_code code{key_code::unknown};
         /**
-         * @brief The platform-specific scan code of the key (Win32: the 8-bit scan code, with 0xE000 added for extended keys).
-         * This is 0 when the platform did not supply one. It is meaningful only for the platform that produced it.
+         * @brief The platform's raw scan code (Win32: the 8-bit scan code, with 0xE000 added for extended keys), or 0
+         * when the platform supplied none. Meaningful only to the platform that produced it; useful for asking the OS
+         * for a localised key name.
          */
         std::uint32_t scancode{0};
-        /** @brief Whether the key was pressed, auto-repeated or released. */
-        key_action action{key_action::press};
-        /** @brief The modifier keys and lock states that were active when the event was generated. */
-        key_modifiers modifiers{key_modifiers::none};
-    };
-
-    /**
-     * @struct text_input_event
-     * @brief Published when the user enters text: one event per committed code point for ordinary typing, possibly several
-     * code points per event for input methods that commit whole strings. Control characters (backspace, escape, tab, enter,
-     * DEL) are never delivered as text; handle them through key_event.
-     * @details The text is stored inline as UTF-32 so the event is trivially copyable and never allocates. Platforms split
-     * longer commits into several consecutive events, so consumers should simply append text() to their buffer.
-     */
-    struct text_input_event : public core::event<text_input_event>
-    {
-        /** @brief Maximum number of code points one event can carry. */
-        static constexpr std::size_t inline_capacity = 16;
-
-        text_input_event() noexcept = default;
-
-        /** @brief Constructs an event holding the first inline_capacity code points of @p input. */
-        explicit text_input_event(std::u32string_view input) noexcept { assign(input); }
-
-        /** @brief Constructs an event holding a single code point. */
-        explicit text_input_event(character_code cp) noexcept { push_back(cp); }
-
-        /** @brief The platform::window_id of the window that received the text. */
-        std::uint64_t window{0};
-        /** @brief The modifier keys and lock states that were active when the text was generated. */
+        /** @brief Whether the key went down, auto-repeated, or came up. */
+        button_action action{button_action::press};
+        /** @brief The modifiers and lock states active when the event was generated. */
         key_modifiers modifiers{key_modifiers::none};
 
-        /** @brief The committed text as UTF-32 code points. The view is valid for the lifetime of the event. */
-        [[nodiscard]] std::u32string_view text() const noexcept { return {m_buffer.data(), m_length}; }
-        /** @brief Number of code points in text(). */
-        [[nodiscard]] std::size_t size() const noexcept { return m_length; }
-        /** @brief True if the event carries no text. */
-        [[nodiscard]] bool empty() const noexcept { return m_length == 0; }
-        /** @brief True if push_back() would drop the code point. */
-        [[nodiscard]] bool full() const noexcept { return m_length == inline_capacity; }
-
-        /** @brief Replaces the text with the first inline_capacity code points of @p input. */
-        void assign(std::u32string_view input) noexcept
-        {
-            const std::size_t n = std::min<std::size_t>(input.size(), inline_capacity);
-            std::copy_n(input.data(), n, m_buffer.data());
-            m_length = static_cast<std::uint8_t>(n);
-        }
-
-        /**
-         * @brief Appends a code point.
-         * @return false (and leaves the event unchanged) if the event is already full.
-         */
-        bool push_back(character_code cp) noexcept
-        {
-            if (full())
-                return false;
-            m_buffer[m_length++] = cp;
-            return true;
-        }
-
-        /** @brief Removes all text. */
-        void clear() noexcept { m_length = 0; }
-
-    private:
-        std::array<char32_t, inline_capacity> m_buffer{};
-        std::uint8_t m_length = 0;
+        /** @brief The slot this event changed. */
+        [[nodiscard]] constexpr control_id control() const noexcept { return control_of(code); }
+        /** @brief True for a press or a repeat. */
+        [[nodiscard]] constexpr bool down() const noexcept { return is_down_action(action); }
     };
 
 } // namespace catalyst::input
