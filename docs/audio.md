@@ -2,7 +2,10 @@
 
 Status: Tier 1 (devices, streams, the real-time seam) reshaped 2026-09-09 to match the conventions
 of `catalyst::events`, `catalyst::logging` and `catalyst::input`. Tier 5 (offline rendering + tests)
-carried across. Tiers 2–4 — mixer/voices, spatial, DSP — are still open and unchanged in scope.
+carried across. Tier 2 opened 2026-09-10 with the lock-free hand-off every voice and bus API is
+built on — `spsc_ring`, `command`, `command_ring` — and the mixer core that is its first consumer:
+`sound_buffer`, `voice` handles, and a flat `mixer` driven entirely through the ring. The bus tree,
+streaming voices and decoders are still open, as are Tiers 3–4 (spatial, DSP), unchanged in scope.
 
 ## Why this was reshaped
 
@@ -47,6 +50,9 @@ mixer and a voice API are built on top.
                         │  stream::open() ──► std::expected<stream,error> │
                         │        │                                        │
    driver thread ◄──────┼────────┤ renderer(render_block&) noexcept       │
+                        │        │                                        │
+   game thread ─────────┼──► command_ring ──► execute(), on that thread   │
+   (voices, parameters) │        no lock, no allocation, in order         │
                         │        │                                        │
    OS notify thread ────┼──► notice_queue ──► pump() ──► events::bus      │
                         │                       (caller's thread)         │
@@ -121,6 +127,10 @@ Each header is one concern; `audio/audio.hpp` pulls in the module.
 | `audio/backend.hpp` | `backend_kind`, `is_available()`, `available_backends()`, `default_backend()` |
 | `audio/device.hpp` | `device_info`, `device_selector`, `devices()`, `default_device()`, `find_device()` |
 | `audio/block.hpp` | `render_block`, `renderable`, `renderer` — and the real-time contract, stated in one place |
+| `audio/ring.hpp` | `cache_line_bytes`, `ring_element`, `spsc_ring<T>` — the lock-free hand-off between two threads |
+| `audio/command.hpp` | `commandable`, `command`, `command_ring` — a change posted on one thread and applied on the render thread |
+| `audio/sound.hpp` | `sound_id`, `sound_buffer` — decoded audio in memory, and the handle a mixer knows it by |
+| `audio/mixer.hpp` | `voice_id`, `voice_params`, `mixer_config`, `mixer_stats`, `class mixer` |
 | `audio/stream.hpp` | `stream_config`, `stream_info`, `stream_stats`, `class stream` |
 | `audio/offline.hpp` | `offline_config`, `class offline_stream` |
 | `audio/events.hpp` | tag block `0x0002'0000`, `audio_event<Tag>`, the eight event structs |
@@ -177,22 +187,175 @@ CT_REQUIRE(offline->captured_frames() == 48000);
 
 ### Tier 1 — Devices, streams, the real-time seam ✅ implemented
 
-Everything above. Backends: WASAPI (shared and exclusive), ASIO, null. Reshaped 2026-09-09.
+Everything above. Backends: WASAPI (shared and exclusive), ASIO, null. Reshaped 2026-09-09;
+the backends were factored onto a shared base on 2026-09-10.
+
+#### What a backend is, and what it is not
+
+A backend contains its platform API and nothing else. Everything a backend has *because it is a
+backend* lives in `src/audio/detail_backend_base.hpp`:
+
+- `backend_base` — the request, the `render_dispatcher` and its `stats_block`, the identity of the
+  device that was opened, `is_running`/`stats`/`reset_stats`/`take_xruns`/`take_failure`, and
+  `failure(code)` so every error names the backend that produced it. A backend supplies only
+  `enumerate_devices`, `open`, `start`, `stop`, `close` and `info`.
+- `notice_publisher` — the hand-off from a platform notification thread to `stream::pump()`. Held by
+  `shared_ptr` on both sides and retired at teardown, so a notification already in flight cannot
+  reach freed state, and it owns its own copy of the device identifier so it never reads the
+  backend's. Everything it does is `noexcept`, allocation included.
+
+Sample conversion is `src/audio/detail_convert.hpp`: `sample_format` × `std::endian` resolved once,
+at configuration time, to a `pack_fn`/`unpack_fn`. The device side of a conversion is packed and the
+float side is strided, which is what lets one table serve ASIO's planar per-channel buffers
+(`stride` = channels) and WASAPI's interleaved ones (`stride` = 1). Fixed-point stores clamp; float
+stores deliberately do not.
+
+`src/audio/win32/detail_win32.hpp` is the Windows vocabulary both backends share: `com_ptr`,
+`com_apartment`, `co_task_ptr`, GUID text, and the HRESULT-to-`error_code` mapping. `com_ptr` is
+written against `AddRef`/`Release` alone rather than against `IUnknown`, which is what lets the same
+type hold a WASAPI endpoint and the ASIO loader's hand-declared `IASIO` — the two differ in how an
+interface is *obtained*, not in what one is.
+
+#### Formats
+
+WASAPI prefers float32 and, when it gets it, the renderer writes straight into the driver's buffer
+with no copy. Any other layout the conversion table understands is accepted through a scratch
+buffer, which is what makes exclusive mode usable on interfaces that offer only 24- or 32-bit PCM.
+In exclusive mode the device hands over the whole buffer once per period, so the buffer is the
+block and `GetCurrentPadding` must not be consulted — it reports an exclusive render buffer as
+permanently full.
 
 ### Tier 5 — Offline rendering and tests ✅ implemented
 
-`offline_stream`, the float WAV writer, and `tests/audio/` — `stream`, `offline`, `events`, one
-executable each, CTest names `catalyst.audio.<name>`.
+`offline_stream`, the float WAV writer, and `tests/audio/` — `stream`, `offline`, `events`,
+`convert`, `command`, `mixer`, one executable each, CTest names `catalyst.audio.<name>`. `convert` covers the
+shared conversion table and the GUID round trip; it reaches into `src/` because neither is public.
+`command` and `mixer` are the two that start a thread — ordering and wrap-around in a ring only
+mean anything once a real producer and a real consumer are looking at the indices at the same time,
+and the mixer's whole contract is about which thread may touch what. Everything else about the mixer
+is asserted sample-for-sample through an `offline_stream`, because it renders on demand.
 
-### Tier 2 — Mixer and voices (next)
+### Tier 2 — Mixer and voices (in progress)
 
-Land the **lock-free SPSC command ring** (game thread → audio thread) *first*: every voice and bus
-API depends on it, and retrofitting it later forces a mutex into the render callback. Then
-`sound_buffer` + `voice` handles, a `mixer_bus` tree, streaming voices, and decoders (WAV → Ogg/Opus
-→ FLAC) slotted into the `resource::IProvider` / `registry` pattern.
+#### The command ring ✅ implemented
 
-Handles follow the project rule: index + generation, so a stale `voice` is detected rather than
-aliasing a recycled slot — as `input::device_id` and `ui::node` already do.
+The lock-free SPSC hand-off landed first, on 2026-09-10, for the reason the plan gave: every voice
+and bus API depends on it, and retrofitting it later forces a mutex into the render callback. It is
+three types across two headers.
+
+`spsc_ring<T>` is a bounded queue with one producer thread and one consumer thread. That restriction
+is the feature — one writer and one reader need no compare-exchange and no retry loop, so a push and
+a pop are each a bounded run of instructions with nothing to spin on, which is the only definition of
+"real-time safe" worth having on a thread with a millisecond to spend. Capacity is a power of two
+fixed at construction, so the index wraps with a mask and the buffer is allocated exactly once, by
+whoever built the ring. Indices are monotonic 64-bit counters masked only when addressing a slot,
+which is what makes every slot usable instead of the customary one wasted to tell full from empty.
+
+`command` is what usually crosses it: a `noexcept` callable with its arguments copied into a
+fixed 56-byte payload, one cache line all told. It is the exact inverse of `renderer`, and
+deliberately so — `renderer` *refers* to a callable and refuses to bind a temporary, because it runs
+for the life of the stream; a command is posted, waits, and runs later, so it *owns* its captures and
+a temporary lambda is the intended argument. The `commandable` concept rejects at compile time the
+four captures that would break the render thread: one that can throw, one that is not trivially
+copyable, one that is not trivially destructible (a `shared_ptr` capture would call `free` at 48 kHz
+when the command is discarded), and one too large for the preallocated slot.
+
+`command_ring` is the channel plus its counters — `posted`, `executed`, `refused`. `execute(budget)`
+caps how much work one block will do, because an unbounded drain makes a block's cost depend on how
+busy the game thread was. A full ring refuses the *newest* command, the opposite of `notice_queue`:
+for device topology the newest state is the only one worth having, but applying a "set gain" whose
+"start voice" was thrown away produces state nobody asked for. `refused` counts refusals rather than
+losses, because only the caller knows which it was — a game thread that gives up has lost a command,
+one that posts again has not.
+
+Ownership travels back the same way. When a command hands the render thread something to replace,
+the old object must not be freed there; it goes into a second ring pointing the other way, which the
+game thread drains and destroys. There is no separate type for the return path because it is the
+same mechanism with the threads swapped.
+
+```cpp
+audio::command_ring to_audio;                       // game thread → render thread
+audio::spsc_ring<std::unique_ptr<sound>> retired(64); // and back, for what it replaces
+
+// Game thread. A temporary lambda is right here; captures are copied.
+to_audio.post([&mixer, voice, gain]() noexcept { mixer.set_gain(voice, gain); });
+
+// Render thread, at the top of the block.
+auto render = [&](audio::render_block &block) noexcept {
+    to_audio.execute(64);       // bounded, so a burst cannot become an xrun
+    mixer.fill(block);
+};
+```
+
+#### The mixer core ✅ implemented
+
+`sound_buffer`, `voice` handles and a flat `mixer`, landed the same day on top of the ring. A game
+thread calls `add_sound`, `play`, `set_gain`, `stop`; the render thread calls `render(block)`, which
+applies the queue and sums whatever is playing. Handles follow the project rule — index plus
+generation, so a stale `voice` is detected rather than turning down whatever took its slot, as
+`input::device_id` and `ui::node` already do.
+
+Four decisions are worth keeping:
+
+**The mixer takes its format from the block, not from a config.** `mixer_config` has sizes and
+nothing else: no `sample_rate`, no `output_channels`, because `render_block` already carries both
+and a device is free to negotiate something other than what was asked for. A separately configured
+mixer could disagree with the stream feeding it, and the disagreement would be inaudible right up
+until it was a wrong pitch.
+
+**A handle is answered immediately; the work happens later.** `play()` returns a `voice_id` before
+the render thread has seen the command, because a caller that has to wait a block to learn what it
+just started cannot use the answer. The slot is allocated on the game thread and the command carries
+it, so the two cannot disagree — and a `play` whose command is refused rolls the slot back rather
+than leaking it.
+
+**Nothing is freed on the render thread, and no return ring is needed to arrange that.**
+command.hpp describes handing an object back through a second ring, which is right when the render
+thread holds the only reference. The mixer is arranged so that it never does: the game thread owns
+every `sound_buffer` for as long as the mixer knows about it, and the render thread only holds a
+pointer. So retiring one is a pointer dropped and an atomic word cleared — which, unlike a message,
+cannot be refused by a full ring — and `collect()` frees it on the game thread. The same atomic
+trick reclaims finished voice slots, which is why a voice that ends needs to tell nobody.
+
+**Gain and pan ramp across a block; they do not jump.** A gain applied as a step is a discontinuity,
+and a discontinuity is a click — which is what separates a mixer from a loop that adds. A gain given
+to `play` applies at once (a fade-in nobody asked for is just as wrong), and a gain *changed* later
+interpolates over exactly one block.
+
+`collect()` is the counterpart to `stream::pump()`: it reclaims finished voices, frees released
+sounds, and re-posts anything a full ring refused. Refusals are not all equal, and the mixer says
+which are which — a lost "quieter" is inaudible and the next value supersedes it, so `set_*` is not
+retried; a lost "stop" is a sound that never stops, so `stop`, `stop_all` and `release_sound` are.
+
+```cpp
+audio::mixer mix;
+const auto footstep = mix.add_sound(std::move(buffer));
+
+auto stream = audio::stream::open(cfg, mix);      // a mixer *is* a renderable
+stream->start();
+
+mix.play(footstep, {.gain = 0.8f, .pan = -0.3f}); // game thread, any time
+
+while (running) {
+    stream->pump();
+    mix.collect();                                 // once a frame, beside pump()
+    frame();
+}
+```
+
+#### Still open
+
+A `mixer_bus` tree — groups, per-group effects, sends — which slots in between the voice loop and
+the block without changing the surface above. Then streaming voices and decoders (WAV → Ogg/Opus →
+FLAC) into the `resource::IProvider` / `registry` pattern.
+
+A streaming voice will also want a *bulk* ring — many samples per operation rather than one element
+per push — which `spsc_ring` deliberately is not. That is a second type built on the same indices,
+and it lands with the decoders that need it rather than in advance of them.
+
+Playing a sound whose rate differs from the device's is handled by a linearly interpolated read
+position, which is right in pitch and cheap, and audibly imperfect on large ratios. The Tier 4
+resampler replaces that read and nothing else.
 
 ### Tier 3 — Spatial
 
@@ -226,5 +389,7 @@ Biquads, delay, FDN reverb, master limiter, resampler.
   float counter.
 - `render_block::frames` is the only truth about a block's size. `stream_info::block_frames` is
   nominal, and a device may hand over a short block at any time.
-- Nothing in a renderer may allocate, lock, block, do I/O, or log.
+- Nothing in a renderer may allocate, lock, block, do I/O, or log. A renderer that needs to hear
+  from the rest of the program does it through a `command_ring`, and hands anything it is finished
+  with back through a second ring rather than destroying it.
 - Audio owns event tag block `0x0002'0000`–`0x0002'FFFF`. Values are never reused or reordered.

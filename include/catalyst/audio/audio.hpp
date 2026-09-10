@@ -12,10 +12,14 @@
 
 #include <catalyst/audio/backend.hpp>
 #include <catalyst/audio/block.hpp>
+#include <catalyst/audio/command.hpp>
 #include <catalyst/audio/device.hpp>
 #include <catalyst/audio/error.hpp>
 #include <catalyst/audio/events.hpp>
+#include <catalyst/audio/mixer.hpp>
 #include <catalyst/audio/offline.hpp>
+#include <catalyst/audio/ring.hpp>
+#include <catalyst/audio/sound.hpp>
 #include <catalyst/audio/stream.hpp>
 #include <catalyst/audio/types.hpp>
 

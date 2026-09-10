@@ -1,64 +1,56 @@
-#pragma once
+/**
+ * @file asio_loader.h
+ * @brief The ASIO 2.x ABI, declared rather than included, and the driver loader that reaches it
+ * without the COM runtime.
+ * @details A real ASIO driver does not export `ASIOInit`, `ASIOStart` and the rest - those are
+ * convenience wrappers the Steinberg SDK compiles into the *host*, which forward to the driver's
+ * `IASIO` interface. So the SDK is not needed to talk to a driver, only to spell its interface, and
+ * that is what this header does: the vtable layout of `IASIO`, in Catalyst's naming, with the field
+ * layouts of the structures it passes.
+ *
+ * The driver itself is reached by loading its DLL and calling `DllGetClassObject` directly, which
+ * is what `CoCreateInstance` would have done after a registry lookup and a marshalling decision
+ * neither side wants. What is *not* hand-rolled is reference counting: `IASIO` derives from an
+ * interface with the standard `AddRef`/`Release` prefix, so it is held by the same @ref
+ * catalyst::audio::detail::win32::com_ptr that holds WASAPI's endpoints.
+ *
+ * Failures come back as `std::expected`, like every other seam in the module, rather than as the
+ * exceptions this file used to throw and its caller used to flatten into one `platform_error`.
+ * License: CDDL-1.0 (see LICENSE).
+ */
 
-#include <cstdint>
-#include <optional>
-#include <string>
-#include <string_view>
-#include <vector>
+#pragma once
 
 #if defined(_WIN32)
 
-#  include <win32/windows_lean.hpp>
+#  include "../win32/detail_win32.hpp"
 
-#  include <winreg.h>
+#  include <catalyst/audio/error.hpp>
 
-#else
-
-// Stubs for non-Windows tooling / analysis builds.
-#  ifndef WINAPI
-#    define WINAPI
-#  endif
-#  ifndef __stdcall
-#    define __stdcall
-#  endif
-
-using BOOL = int;
-using HMODULE = void*;
-
-struct GUID
-{
-    uint32_t Data1;
-    uint16_t Data2;
-    uint16_t Data3;
-    uint8_t  Data4[8];
-};
-
-#endif
+#  include <cstdint>
+#  include <expected>
+#  include <string>
+#  include <vector>
 
 namespace catalyst::audio::asio
 {
 
-    // -----------------------------------------------------------------------------
-    // Minimal ASIO 2.x ABI (SDK-free)
-    // Notes:
-    // - Real ASIO drivers typically do NOT export `ASIOInit`/`ASIOStart` etc.
-    //   Those functions are SDK convenience wrappers that forward to the driver's
-    //   `IASIO` interface.
-    // - To avoid COM runtime / CoCreateInstance, we load the driver's DLL and call
-    //   `DllGetClassObject` directly.
-    // -----------------------------------------------------------------------------
+    // --------------------------------------------------------------------------------------------
+    // The ASIO 2.x ABI
+    // --------------------------------------------------------------------------------------------
 
-    using asio_bool = int32_t;
-    using asio_error = int32_t;
+    using asio_bool = std::int32_t;
+
+    /** @brief A driver result. Zero is `ASE_OK`; every non-zero value is a failure. */
+    using asio_error = std::int32_t;
+
     using asio_sample_rate = double;
 
-    // Keep these as plain ints for ABI compatibility. (Exact enum values are not
-    // required by the loader; they only matter when interpreting driver data.)
-    enum class asio_sample_type : int32_t
+    /** @brief Steinberg's `ASIOSampleType` values, which drivers report per channel. */
+    enum class asio_sample_type : std::int32_t
     {
         unknown = -1,
 
-        // Matches Steinberg ASIOSampleType values.
         int16_msb = 0,
         int24_msb = 1,
         int32_msb = 2,
@@ -84,8 +76,8 @@ namespace catalyst::audio::asio
 
     struct asio_driver_info
     {
-        int32_t asio_version;
-        int32_t driver_version;
+        std::int32_t asio_version;
+        std::int32_t driver_version;
         char name[32];
         char error_message[124];
         void *sys_ref;
@@ -93,10 +85,10 @@ namespace catalyst::audio::asio
 
     struct asio_channel_info
     {
-        int32_t channel;
+        std::int32_t channel;
         asio_bool is_input;
         asio_bool is_active;
-        int32_t channel_group;
+        std::int32_t channel_group;
         asio_sample_type sample_type;
         char name[32];
     };
@@ -105,85 +97,104 @@ namespace catalyst::audio::asio
 
     struct asio_callbacks
     {
-        void (*buffer_switch)(int32_t double_buffer_index, int32_t direct_process);
+        void (*buffer_switch)(std::int32_t double_buffer_index, std::int32_t direct_process);
         void (*sample_rate_did_change)(asio_sample_rate sample_rate);
-        int32_t (*asio_message)(int32_t selector, int32_t value, void *message, double *opt);
+        std::int32_t (*asio_message)(std::int32_t selector, std::int32_t value, void *message, double *opt);
         asio_time *(*buffer_switch_time_info)(
             asio_time *params,
-            int32_t double_buffer_index,
-            int32_t direct_process);
+            std::int32_t double_buffer_index,
+            std::int32_t direct_process);
     };
 
     struct asio_buffer_info
     {
         asio_bool is_input;
-        int32_t channel_num;
+        std::int32_t channel_num;
         void *buffers[2];
     };
 
-    // Minimal COM ABI (no COM runtime required)
+    /** @brief The selectors `asio_callbacks::asio_message` is called with that we answer. */
+    enum class asio_message_selector : std::int32_t
+    {
+        selector_supported = 1,
+        engine_version = 2,
+        reset_request = 3,
+        buffer_size_change = 4,
+        reset_needed = 5,
+        latencies_changed = 6,
+    };
+
+    // --------------------------------------------------------------------------------------------
+    // The COM ABI, without the COM runtime
+    // --------------------------------------------------------------------------------------------
+
     using hresult = long;
     using ulong = unsigned long;
 
     struct iunknown
     {
-        virtual hresult __stdcall QueryInterface(const GUID &riid, void **ppv_object) = 0;
+        virtual hresult __stdcall QueryInterface(const GUID &riid, void **object) = 0;
         virtual ulong __stdcall AddRef() = 0;
         virtual ulong __stdcall Release() = 0;
     };
 
     struct iclass_factory : iunknown
     {
-        virtual hresult __stdcall CreateInstance(iunknown *outer, const GUID &riid, void **ppv_object) = 0;
+        virtual hresult __stdcall CreateInstance(iunknown *outer, const GUID &riid, void **object) = 0;
         virtual hresult __stdcall LockServer(BOOL lock) = 0;
     };
 
-    // IASIO interface (ASIO 2.x)
-    // vtable order must match Steinberg's definition.
+    /** @brief `IASIO`. The declaration order *is* the vtable order and must match Steinberg's. */
     struct iasio : iunknown
     {
         virtual asio_bool __stdcall init(void *sys_handle) = 0;
         virtual void __stdcall get_driver_name(char *name) = 0;
-        virtual int32_t __stdcall get_driver_version() = 0;
+        virtual std::int32_t __stdcall get_driver_version() = 0;
         virtual void __stdcall get_error_message(char *string) = 0;
 
         virtual asio_error __stdcall start() = 0;
         virtual asio_error __stdcall stop() = 0;
-        virtual asio_error __stdcall get_channels(int32_t *num_input_channels, int32_t *num_output_channels) = 0;
-        virtual asio_error __stdcall get_latencies(int32_t *input_latency, int32_t *output_latency) = 0;
+        virtual asio_error __stdcall get_channels(
+            std::int32_t *num_input_channels, std::int32_t *num_output_channels) = 0;
+        virtual asio_error __stdcall get_latencies(
+            std::int32_t *input_latency, std::int32_t *output_latency) = 0;
         virtual asio_error __stdcall get_buffer_size(
-            int32_t *min_size,
-            int32_t *max_size,
-            int32_t *preferred_size,
-            int32_t *granularity) = 0;
+            std::int32_t *min_size,
+            std::int32_t *max_size,
+            std::int32_t *preferred_size,
+            std::int32_t *granularity) = 0;
         virtual asio_error __stdcall can_sample_rate(asio_sample_rate sample_rate) = 0;
         virtual asio_error __stdcall get_sample_rate(asio_sample_rate *sample_rate) = 0;
         virtual asio_error __stdcall set_sample_rate(asio_sample_rate sample_rate) = 0;
 
-        virtual asio_error __stdcall get_clock_sources(void *clocks, int32_t *num_sources) = 0;
-        virtual asio_error __stdcall set_clock_source(int32_t reference) = 0;
+        virtual asio_error __stdcall get_clock_sources(void *clocks, std::int32_t *num_sources) = 0;
+        virtual asio_error __stdcall set_clock_source(std::int32_t reference) = 0;
         virtual asio_error __stdcall get_sample_position(void *sample_position, void *time_stamp) = 0;
         virtual asio_error __stdcall get_channel_info(asio_channel_info *info) = 0;
         virtual asio_error __stdcall create_buffers(
             asio_buffer_info *buffer_infos,
-            int32_t num_channels,
-            int32_t buffer_size,
+            std::int32_t num_channels,
+            std::int32_t buffer_size,
             asio_callbacks *callbacks) = 0;
         virtual asio_error __stdcall dispose_buffers() = 0;
         virtual asio_error __stdcall control_panel() = 0;
-        virtual asio_error __stdcall future(int32_t selector, void *opt) = 0;
+        virtual asio_error __stdcall future(std::int32_t selector, void *opt) = 0;
         virtual asio_error __stdcall output_ready() = 0;
     };
 
-    // Standard IID for IUnknown: 00000000-0000-0000-C000-000000000046
-    inline constexpr GUID iid_iunknown =
-        {
-            0x00000000,
-            0x0000,
-            0x0000,
-            {0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46},
+    /** @brief `IID_IUnknown`, which is what a driver's class factory is asked for. */
+    inline constexpr GUID iid_iunknown = {
+        0x00000000,
+        0x0000,
+        0x0000,
+        {0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46},
     };
 
+    // --------------------------------------------------------------------------------------------
+    // Installed drivers
+    // --------------------------------------------------------------------------------------------
+
+    /** @brief One driver as the registry describes it, before anything has been loaded. */
     struct installed_driver
     {
         std::wstring name;
@@ -191,15 +202,22 @@ namespace catalyst::audio::asio
         GUID clsid{};
     };
 
-    // Enumerates drivers from the common registry locations.
-    // This avoids COM/CoCreateInstance but still uses the conventional ASIO registry keys.
-    std::vector<installed_driver> enumerate_installed_drivers();
+    /**
+     * @brief Every driver registered under the conventional ASIO keys.
+     * @details Both the native and the WOW6432 view are read, because a 32-bit host on a 64-bit
+     * system sees its drivers only through the latter. Entries without a DLL path or a parseable
+     * CLSID are skipped: they cannot be loaded, so listing them would only offer the caller a
+     * device that is certain to fail to open.
+     */
+    [[nodiscard]] std::vector<installed_driver> enumerate_installed_drivers();
 
-    std::optional<installed_driver> find_installed_driver(std::wstring_view driver_name);
-
-    // Parses "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}" or "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx".
-    std::optional<GUID> try_parse_guid(std::wstring_view text);
-
+    /**
+     * @class driver
+     * @brief One loaded ASIO driver: its module, and one reference to its `IASIO`.
+     * @details Ownership is ordered - the interface is released before the module that defined its
+     * vtable is unloaded - which is the whole reason this is a class rather than two members of the
+     * backend.
+     */
     class driver
     {
     public:
@@ -212,25 +230,30 @@ namespace catalyst::audio::asio
         driver(driver &&other) noexcept;
         driver &operator=(driver &&other) noexcept;
 
-        void load_library(const std::wstring &dll_path);
-        void create_instance(const GUID &clsid);
-        void unload();
+        /**
+         * @brief Loads @p installed and instantiates its class, without the COM runtime.
+         * @return Nothing, or why the driver could not be reached: `no_device` when the DLL is
+         * missing or is not an ASIO driver at all, `platform_error` when it is one but refused to
+         * instantiate.
+         */
+        [[nodiscard]] std::expected<void, error_code> open(const installed_driver &installed) noexcept;
 
-        bool is_loaded() const noexcept { return module_ != nullptr; }
-        bool has_instance() const noexcept { return asio_ != nullptr; }
+        /** @brief Releases the interface, then unloads the module. Safe when never opened. */
+        void close() noexcept;
 
-        iasio *get() noexcept { return asio_; }
-        const iasio *get() const noexcept { return asio_; }
+        [[nodiscard]] bool is_open() const noexcept { return static_cast<bool>(instance_); }
+
+        [[nodiscard]] iasio *get() const noexcept { return instance_.get(); }
+        iasio *operator->() const noexcept { return instance_.get(); }
 
     private:
-        using dll_get_class_object_fn = hresult(WINAPI *)(const GUID &rclsid, const GUID &riid, void **ppv);
-
-        void reset_instance() noexcept;
-        void reset_library() noexcept;
+        using dll_get_class_object_fn =
+            hresult(WINAPI *)(const GUID &clsid, const GUID &iid, void **object);
 
         HMODULE module_ = nullptr;
-        dll_get_class_object_fn dll_get_class_object_ = nullptr;
-        iasio *asio_ = nullptr;
+        detail::win32::com_ptr<iasio> instance_;
     };
 
 } // namespace catalyst::audio::asio
+
+#endif // _WIN32

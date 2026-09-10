@@ -8,6 +8,7 @@ add_library(catalyst_audio STATIC
   backend_registry.cpp
   device.cpp
   error.cpp
+  mixer.cpp
   offline.cpp
   stream.cpp
   null/audio_backend_null.cpp
