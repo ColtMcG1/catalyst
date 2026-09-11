@@ -23,6 +23,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <span>
@@ -356,6 +357,48 @@ namespace
         destroy_device(dev);
     }
 
+    /**
+     * A task dropped while its `co_await` is still parked must take its continuation out of the
+     * park list on the way down, or `pump` is left holding the handle of a frame `~task` has freed
+     * and resumes it.
+     */
+    void test_dropping_a_parked_await_unparks_it()
+    {
+        device dev = create_device();
+        CT_REQUIRE(is_valid(dev));
+
+        copy_work w = make_copy_work(dev, queue_kind::copy, 1300);
+        const auto done = submit(get_queue(dev, queue_kind::copy), w.list);
+        CT_REQUIRE(done);
+
+        const std::size_t parked_before = detail::parked_count();
+
+        await_trace trace;
+        {
+            events::task<void> task = await_point(*done, trace);
+            task.start();
+
+            // On a real adapter the point is probably not reached yet and the coroutine parked; on
+            // the bookkeeping backend `await_ready` was true and it never suspended. Only the first
+            // case is the one under test.
+            const bool parked = !task.done();
+            CT_REQUIRE(parked == (detail::parked_count() == parked_before + 1));
+
+            // Dropped here, still parked.
+        }
+
+        CT_REQUIRE(detail::parked_count() == parked_before);
+
+        // Nothing may run any part of that frame again, however far the GPU gets.
+        trace.resumed = false;
+        CT_REQUIRE(done->wait());
+        pump(dev);
+        CT_REQUIRE(!trace.resumed);
+
+        w.destroy();
+        destroy_device(dev);
+    }
+
     void test_bounded_wait()
     {
         device dev = create_device();
@@ -399,6 +442,7 @@ int main()
         {"queue kind is enforced", test_queue_kind_is_enforced},
         {"co_await resumes in pump", test_co_await_resumes_in_pump},
         {"await completed point does not park", test_await_completed_point_does_not_park},
+        {"dropping a parked await", test_dropping_a_parked_await_unparks_it},
         {"bounded wait", test_bounded_wait},
     };
 

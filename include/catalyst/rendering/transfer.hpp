@@ -247,14 +247,31 @@ namespace catalyst::rendering
                 const readback *self;
                 timeline_point point;
 
+                /** The handle this awaiter put in the park list, while it is still in there. */
+                std::coroutine_handle<> parked{};
+
                 [[nodiscard]] bool await_ready() const noexcept { return point.is_complete(); }
-                [[nodiscard]] bool await_suspend(std::coroutine_handle<> continuation) const
+                [[nodiscard]] bool await_suspend(std::coroutine_handle<> continuation)
                 {
-                    return detail::park(point, continuation);
+                    if (!detail::park(point, continuation))
+                        return false;
+
+                    parked = continuation;
+                    return true;
                 }
-                [[nodiscard]] std::expected<std::span<const std::byte>, error> await_resume() const
+                [[nodiscard]] std::expected<std::span<const std::byte>, error> await_resume()
                 {
+                    // `pump` took the entry out of the list before resuming us.
+                    parked = {};
                     return self->bytes();
+                }
+
+                // See timeline_point::operator co_await: dropping a parked task would otherwise
+                // leave `pump` holding a handle to a freed frame.
+                ~awaiter()
+                {
+                    if (parked)
+                        detail::unpark(parked);
                 }
             };
             return awaiter{this, point_};

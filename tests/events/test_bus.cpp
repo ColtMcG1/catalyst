@@ -544,6 +544,13 @@ namespace
                                        b.dispatch(ping{1});
                                }};
 
+        // Dispatching, not merely spawned: an optimised build can finish the whole loop below in
+        // less time than it takes Windows to schedule the thread, in which case the dispatcher sees
+        // stop on its first check, delivers nothing, and leaves calls at zero. That is a test that
+        // overlaps nothing, not a fault in the bus.
+        while (calls.load(std::memory_order_relaxed) == 0)
+            std::this_thread::yield();
+
         // Adding and removing under a concurrent dispatch must not corrupt the
         // registry or trip on a callable a dispatch is still holding.
         for (int i = 0; i < 2000; ++i)

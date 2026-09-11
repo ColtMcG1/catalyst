@@ -51,6 +51,7 @@
 #include <chrono>
 #include <compare>
 #include <coroutine>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 
@@ -68,6 +69,21 @@ namespace catalyst::rendering
          * Not part of the public API.
          */
         bool park(const timeline_point &point, std::coroutine_handle<> continuation);
+
+        /**
+         * Takes `continuation` back out of the park list, if it is still in it. Called when a
+         * parked coroutine is destroyed rather than resumed, so that `pump` is not left holding a
+         * handle to a freed frame. A no-op for a continuation that is not parked.
+         * Not part of the public API.
+         */
+        void unpark(std::coroutine_handle<> continuation) noexcept;
+
+        /**
+         * How many continuations are parked, across every device. For tests: the only way to see
+         * that a dropped task took its continuation with it is to count what is left behind.
+         * Not part of the public API.
+         */
+        [[nodiscard]] std::size_t parked_count() noexcept;
     } // namespace detail
 
     /**
@@ -142,6 +158,11 @@ namespace catalyst::rendering
          * `co_await` yields `std::expected<void, error>`: a device lost while the coroutine was
          * parked resumes it with @ref error_code::device_lost rather than letting it proceed as if
          * the work had finished.
+         *
+         * A parked task may be dropped: destroying it takes its continuation back out of the park
+         * list, so a later @ref pump will not resume it. The one case that stays the caller's is
+         * destroying a task while a @ref pump on another thread is already resuming it - the
+         * resumption is under way by then and no bookkeeping here can call it back.
          */
         [[nodiscard]] auto operator co_await() const noexcept
         {
@@ -149,22 +170,43 @@ namespace catalyst::rendering
             {
                 timeline_point point;
 
+                /** The handle this awaiter put in the park list, while it is still in there. */
+                std::coroutine_handle<> parked{};
+
                 [[nodiscard]] bool await_ready() const noexcept { return point.is_complete(); }
 
-                [[nodiscard]] bool await_suspend(std::coroutine_handle<> continuation) const
+                [[nodiscard]] bool await_suspend(std::coroutine_handle<> continuation)
                 {
                     // False resumes immediately: the device is gone, so nothing will ever pump it.
-                    return detail::park(point, continuation);
+                    if (!detail::park(point, continuation))
+                        return false;
+
+                    parked = continuation;
+                    return true;
                 }
 
-                [[nodiscard]] std::expected<void, error> await_resume() const noexcept
+                [[nodiscard]] std::expected<void, error> await_resume() noexcept
                 {
+                    // `pump` took the entry out of the list before resuming us, so there is nothing
+                    // left to give back.
+                    parked = {};
+
                     // `pump` resumes a continuation for one of two reasons: the point completed, or
                     // the device died and nothing will ever complete again. `is_complete` reports
                     // true in both cases, on purpose, so ask the device which one happened.
                     if (point.valid() && is_device_lost(point.owner()))
                         return std::unexpected(make_error(error_code::device_lost));
                     return {};
+                }
+
+                // The awaiter lives in the coroutine frame, so destroying a suspended coroutine
+                // runs this. Dropping a parked task - an early return, an exception, a frame job
+                // that went away - would otherwise leave `pump` holding a handle to a freed frame
+                // and resuming it.
+                ~awaiter()
+                {
+                    if (parked)
+                        detail::unpark(parked);
                 }
             };
             return awaiter{*this};

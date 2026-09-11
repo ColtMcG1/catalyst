@@ -102,6 +102,29 @@ namespace catalyst::rendering
             list.entries.push_back({point, continuation});
             return true;
         }
+
+        void unpark(std::coroutine_handle<> continuation) noexcept
+        {
+            if (!continuation)
+                return;
+
+            park_list &list = parked();
+            const std::scoped_lock lock{list.mutex};
+
+            const auto pos = std::find_if(list.entries.begin(), list.entries.end(),
+                                          [continuation](const parked_continuation &entry) {
+                                              return entry.continuation == continuation;
+                                          });
+            if (pos != list.entries.end())
+                list.entries.erase(pos);
+        }
+
+        std::size_t parked_count() noexcept
+        {
+            park_list &list = parked();
+            const std::scoped_lock lock{list.mutex};
+            return list.entries.size();
+        }
     } // namespace detail
 
     void pump(const device &dev)

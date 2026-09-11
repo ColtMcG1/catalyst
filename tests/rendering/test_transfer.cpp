@@ -22,6 +22,7 @@
 #include <catalyst/events/task.hpp>
 #include <catalyst/rendering/rendering.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -409,6 +410,60 @@ namespace
         destroy_device(dev);
     }
 
+    /**
+     * A task that is dropped while its `co_await` is parked must take its continuation out of the
+     * park list on the way down. Without that, `pump` still holds the handle of a coroutine frame
+     * that `~task` has freed, and resumes it - a use-after-free that ASan catches and a release
+     * build turns into a crash somewhere else entirely.
+     */
+    void test_dropping_a_parked_download_does_not_strand_it()
+    {
+        constexpr std::size_t count = 32;
+
+        device dev = make_device();
+        buffer target = make_target(dev, count * sizeof(std::uint32_t));
+        const std::vector<std::uint32_t> values = pattern(count, 11);
+        CT_REQUIRE(write_buffer(target, 0, as_bytes(values)));
+
+        const std::size_t parked_before = detail::parked_count();
+
+        bool resumed = false;
+        {
+            auto task = [&]() -> events::task<void> {
+                auto rb = download(dev, target, 0, count * sizeof(std::uint32_t));
+                CT_REQUIRE(rb);
+                (void)co_await *rb;
+                resumed = true;
+            }();
+
+            task.start();
+
+            // On a real adapter the copy is still in flight and the coroutine is parked; on the
+            // bookkeeping backend it completed at submit and ran straight through. Only the first
+            // case is the one under test.
+            const bool parked = !task.done();
+            CT_REQUIRE(parked == (detail::parked_count() == parked_before + 1));
+
+            // Dropped here, still parked.
+        }
+
+        // The assertion that does not depend on a sanitiser: the entry is gone. Without the
+        // awaiter's destructor it would still be in the list, holding a handle to the frame
+        // `~task` just freed, and the next `pump` would resume it.
+        CT_REQUIRE(detail::parked_count() == parked_before);
+
+        // Only a resumption *after* the drop is interesting, so forget whatever happened above.
+        resumed = false;
+
+        pump(dev);
+        pump(dev);
+
+        CT_REQUIRE(!resumed);
+
+        destroy_buffer(target);
+        destroy_device(dev);
+    }
+
     void test_invalid_arguments()
     {
         device dev = make_device();
@@ -466,6 +521,7 @@ int main()
         {"ring wraps", test_ring_wraps},
         {"readback states", test_readback_states},
         {"co_await readback", test_co_await_readback},
+        {"dropping a parked download", test_dropping_a_parked_download_does_not_strand_it},
         {"invalid arguments", test_invalid_arguments},
     };
 
