@@ -51,12 +51,13 @@ namespace catalyst::rendering::detail
 
         if (desc.bytecode_format != shader_bytecode_format::spirv)
         {
-            report("create_shader: the Vulkan backend only accepts SPIR-V bytecode");
+            logging::error<detail::render_log>("create_shader: the Vulkan backend only accepts SPIR-V bytecode");
             return 0;
         }
         if (!looks_like_spirv(desc.bytecode))
         {
-            report("create_shader: bytecode is not SPIR-V (bad magic number or size not a multiple of 4)");
+            logging::error<detail::render_log>(
+                "create_shader: bytecode is not SPIR-V (bad magic number or size not a multiple of 4)");
             return 0;
         }
 
@@ -75,7 +76,8 @@ namespace catalyst::rendering::detail
         const VkResult result = vkCreateShaderModule(dev->device, &info, nullptr, &s.module);
         if (result != VK_SUCCESS)
         {
-            report("create_shader: vkCreateShaderModule failed (%s)", result_string(result));
+            logging::error<detail::render_log>("create_shader: vkCreateShaderModule failed ({})",
+                                               result_string(result));
             return 0;
         }
 

@@ -59,7 +59,7 @@ namespace catalyst::rendering::detail::vulkan
             for (VkSemaphore s : sc.present_ready)
                 vkDestroySemaphore(dev.device, s, nullptr);
             sc.acquire_semaphores.clear();
-            sc.acquire_serials.clear();
+            sc.acquire_points.clear();
             sc.render_finished.clear();
             sc.present_ready.clear();
             sc.acquire_slot = 0;
@@ -85,10 +85,10 @@ namespace catalyst::rendering::detail::vulkan
                 !create_semaphores(dev, sc.render_finished, image_count) ||
                 !create_semaphores(dev, sc.present_ready, image_count))
             {
-                report("create_swapchain: vkCreateSemaphore failed");
+                logging::error<detail::render_log>("create_swapchain: vkCreateSemaphore failed");
                 return false;
             }
-            sc.acquire_serials.assign(image_count + 1, 0);
+            sc.acquire_points.assign(image_count + 1, timeline_point{});
             sc.acquire_slot = 0;
             return true;
         }
@@ -124,8 +124,8 @@ namespace catalyst::rendering::detail::vulkan
 #if defined(VK_USE_PLATFORM_WIN32_KHR)
             if (sc.desc.window.kind != platform::native_handle_kind::win32_hwnd)
             {
-                report("create_swapchain: unsupported native window handle kind %u",
-                       static_cast<unsigned>(sc.desc.window.kind));
+                logging::error<detail::render_log>("create_swapchain: unsupported native window handle kind {}",
+                                                   static_cast<unsigned>(sc.desc.window.kind));
                 return false;
             }
 
@@ -137,18 +137,23 @@ namespace catalyst::rendering::detail::vulkan
             const VkResult result = vkCreateWin32SurfaceKHR(dev.instance, &info, nullptr, &sc.surface);
             if (result != VK_SUCCESS)
             {
-                report("create_swapchain: vkCreateWin32SurfaceKHR failed (%s)", result_string(result));
+                logging::error<detail::render_log>("create_swapchain: vkCreateWin32SurfaceKHR failed ({})",
+                                                   result_string(result));
                 return false;
             }
 #else
-            report("create_swapchain: windowed swapchains are not implemented for this platform yet");
+            logging::error<detail::render_log>(
+                "create_swapchain: windowed swapchains are not implemented for this platform yet");
             return false;
 #endif
             VkBool32 supported = VK_FALSE;
-            vkGetPhysicalDeviceSurfaceSupportKHR(dev.physical_device, dev.queue_family, sc.surface, &supported);
+            // Presentation goes on the graphics queue: it is the family `find_queue_families` already
+            // required to support present, and the only one guaranteed to.
+            vkGetPhysicalDeviceSurfaceSupportKHR(dev.physical_device, queue_for(dev, queue_kind::graphics).family,
+                                                 sc.surface, &supported);
             if (!supported)
             {
-                report("create_swapchain: the device queue cannot present to this surface");
+                logging::error<detail::render_log>("create_swapchain: the device queue cannot present to this surface");
                 return false;
             }
             return true;
@@ -182,13 +187,16 @@ namespace catalyst::rendering::detail::vulkan
             {
                 if (from_vk_format(f.format) != format::unknown && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
                 {
-                    report("create_swapchain: requested format %u is not presentable here; using %u instead",
-                           static_cast<unsigned>(sc.desc.pixel_format), static_cast<unsigned>(from_vk_format(f.format)));
+                    logging::warn<detail::render_log>(
+                        "create_swapchain: requested format {} is not presentable here; using {} instead",
+                        static_cast<unsigned>(sc.desc.pixel_format),
+                        static_cast<unsigned>(from_vk_format(f.format)));
                     pick(f);
                     return true;
                 }
             }
-            report("create_swapchain: no presentable surface format maps onto the public format set");
+            logging::error<detail::render_log>(
+                "create_swapchain: no presentable surface format maps onto the public format set");
             return false;
         }
 
@@ -217,8 +225,9 @@ namespace catalyst::rendering::detail::vulkan
             VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(dev.physical_device, sc.surface, &caps);
             if (result != VK_SUCCESS)
             {
-                report("create_swapchain: vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed (%s)",
-                       result_string(result));
+                logging::error<detail::render_log>(
+                    "create_swapchain: vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed ({})",
+                    result_string(result));
                 return false;
             }
 
@@ -267,6 +276,9 @@ namespace catalyst::rendering::detail::vulkan
             info.imageExtent = extent;
             info.imageArrayLayers = 1;
             info.imageUsage = usage;
+            // Presentation is always on the graphics family here, and the images are only ever
+            // rendered to from graphics lists, so exclusive is correct and cheaper - concurrent can
+            // cost a driver its framebuffer compression on some adapters.
             info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
             info.preTransform = caps.currentTransform;
             info.compositeAlpha = composite;
@@ -278,7 +290,8 @@ namespace catalyst::rendering::detail::vulkan
             result = vkCreateSwapchainKHR(dev.device, &info, nullptr, &created);
             if (result != VK_SUCCESS)
             {
-                report("create_swapchain: vkCreateSwapchainKHR failed (%s)", result_string(result));
+                logging::error<detail::render_log>("create_swapchain: vkCreateSwapchainKHR failed ({})",
+                                                   result_string(result));
                 return false;
             }
 
@@ -345,14 +358,18 @@ namespace catalyst::rendering::detail::vulkan
             const VkSemaphore waits[] = {sc.acquire_semaphores[sc.acquire_slot]};
             const VkPipelineStageFlags stages[] = {VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
             const VkSemaphore signals[] = {sc.render_finished[sc.current_image]};
-            const std::uint64_t serial = submit_batch(dev, {}, waits, stages, signals);
-            if (serial == 0)
+            const auto value = submit_batch(dev, {.kind = queue_kind::graphics,
+                                                  .binary_waits = waits,
+                                                  .wait_stages = stages,
+                                                  .binary_signals = signals});
+            if (!value)
                 return false;
 
+            const timeline_point point{rendering::device{sc.owner}, queue_kind::graphics, *value};
             sc.acquire_pending = false;
-            sc.acquire_serials[sc.acquire_slot] = serial;
+            sc.acquire_points[sc.acquire_slot] = point;
             sc.acquire_slot = (sc.acquire_slot + 1) % static_cast<std::uint32_t>(sc.acquire_semaphores.size());
-            sc.render_finished_serial = serial;
+            sc.render_finished_point = point;
             std::erase(dev.pending_acquires, id);
             return true;
         }
@@ -384,7 +401,7 @@ namespace catalyst::rendering::detail::vulkan
         }
     }
 
-    void complete_acquire_waits(device_state &dev, std::uint64_t serial) noexcept
+    void complete_acquire_waits(device_state &dev, const timeline_point &point) noexcept
     {
         for (const resource_id id : dev.pending_acquires)
         {
@@ -392,9 +409,9 @@ namespace catalyst::rendering::detail::vulkan
             if (!sc || !sc->acquire_pending)
                 continue;
             sc->acquire_pending = false;
-            sc->acquire_serials[sc->acquire_slot] = serial;
+            sc->acquire_points[sc->acquire_slot] = point;
             sc->acquire_slot = (sc->acquire_slot + 1) % static_cast<std::uint32_t>(sc->acquire_semaphores.size());
-            sc->render_finished_serial = serial;
+            sc->render_finished_point = point;
         }
         dev.pending_acquires.clear();
     }
@@ -514,7 +531,8 @@ namespace catalyst::rendering::detail
         device_state *dev = find_device(sc->owner);
         if (!dev)
             return 0;
-        poll_submissions(*dev);
+        refresh_completed(*dev);
+        collect_garbage(*dev);
 
         if (!sc->windowed)
         {
@@ -530,7 +548,7 @@ namespace catalyst::rendering::detail
             return sc->images[sc->current_image]; // Acquired and not yet presented: same image again.
 
         const std::uint32_t slot = sc->acquire_slot;
-        wait_for_serial(*dev, sc->acquire_serials[slot]); // The semaphore must not be in use any more.
+        wait_point(*dev, sc->acquire_points[slot]); // The semaphore must not be in use any more.
 
         std::uint32_t index = 0;
         const VkResult result = vkAcquireNextImageKHR(dev->device, sc->swapchain, UINT64_MAX,
@@ -542,7 +560,8 @@ namespace catalyst::rendering::detail
         }
         if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
         {
-            report("acquire_next_image: vkAcquireNextImageKHR failed (%s)", result_string(result));
+            logging::error<detail::render_log>("acquire_next_image: vkAcquireNextImageKHR failed ({})",
+                                               result_string(result));
             return 0;
         }
 
@@ -573,13 +592,17 @@ namespace catalyst::rendering::detail
             return false;
 
         VkSemaphore wait = sc->render_finished[sc->current_image];
-        if (dev->last_serial > sc->render_finished_serial)
+        if (queue_for(*dev, queue_kind::graphics).last_submitted > sc->render_finished_point.value())
         {
             // Work was submitted after render_finished was signalled: chain a signal that covers it too.
             const VkSemaphore waits[] = {wait};
             const VkPipelineStageFlags stages[] = {VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
             const VkSemaphore signals[] = {sc->present_ready[sc->current_image]};
-            if (submit_batch(*dev, {}, waits, stages, signals) == 0)
+            const auto chained = submit_batch(*dev, {.kind = queue_kind::graphics,
+                                                     .binary_waits = waits,
+                                                     .wait_stages = stages,
+                                                     .binary_signals = signals});
+            if (!chained)
                 return false;
             wait = signals[0];
         }
@@ -591,7 +614,7 @@ namespace catalyst::rendering::detail
         info.pSwapchains = &sc->swapchain;
         info.pImageIndices = &sc->current_image;
 
-        const VkResult result = vkQueuePresentKHR(dev->queue, &info);
+        const VkResult result = vkQueuePresentKHR(queue_for(*dev, queue_kind::graphics).queue, &info);
         sc->acquired = false;
 
         if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR)
@@ -601,7 +624,7 @@ namespace catalyst::rendering::detail
             sc->out_of_date = true;
             return false;
         }
-        report("present: vkQueuePresentKHR failed (%s)", result_string(result));
+        logging::error<detail::render_log>("present: vkQueuePresentKHR failed ({})", result_string(result));
         return false;
     }
 

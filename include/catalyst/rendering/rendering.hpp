@@ -9,13 +9,19 @@
  * organised around one `device` from which every other resource is created, opaque handles for those resources, and
  * `command_list`s that record work for `submit`. See the individual headers for details:
  *   - types.hpp      handles, formats, flag helpers, geometry structs
+ *   - error.hpp      error_code and the `error` every fallible call reports through `std::expected`
+ *   - events.hpp     device loss and swapchain invalidation, published on a `catalyst::events::bus`
  *   - device.hpp     device creation and adapter queries
+ *   - timeline.hpp   `timeline_point`, the moment a submission completes, and `pump`
+ *   - queue.hpp      the graphics / compute / copy engines, and `submit`
  *   - buffer.hpp     buffers and `structured_buffer<T>`
  *   - shader.hpp     shader modules from bytecode
  *   - texture.hpp    textures and samplers
  *   - pipeline.hpp   graphics / compute pipeline state objects
  *   - swapchain.hpp  presentable back buffers for a platform window
- *   - command.hpp    command lists, render passes and submission
+ *   - command.hpp    command lists, command pools and render passes
+ *   - frame.hpp      `frame_ring`: N frames in flight and the pools belonging to each
+ *   - transfer.hpp   asynchronous uploads and downloads over the staging ring
  *
  * A minimal frame looks like:
  * @code
@@ -31,21 +37,28 @@
  *   // set_pipeline / set_vertex_buffer / draw ...
  *   end_render_pass(cl);
  *   end_recording(cl);
- *   submit(dev, cl);
+ *   const timeline_point done = submit(get_queue(dev), cl).value();
  *   present(sc);
+ *   pump(dev);                 // resume coroutines, retire what `done` released
  * @endcode
  */
 
 #pragma once
 
 #include <catalyst/rendering/types.hpp>
+#include <catalyst/rendering/error.hpp>
+#include <catalyst/rendering/events.hpp>
 #include <catalyst/rendering/device.hpp>
+#include <catalyst/rendering/timeline.hpp>
 #include <catalyst/rendering/buffer.hpp>
 #include <catalyst/rendering/shader.hpp>
 #include <catalyst/rendering/texture.hpp>
 #include <catalyst/rendering/pipeline.hpp>
 #include <catalyst/rendering/swapchain.hpp>
 #include <catalyst/rendering/command.hpp>
+#include <catalyst/rendering/queue.hpp>
+#include <catalyst/rendering/frame.hpp>
+#include <catalyst/rendering/transfer.hpp>
 
 /**
  * @namespace catalyst::rendering

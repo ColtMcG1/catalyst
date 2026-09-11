@@ -4,8 +4,15 @@
  *
  * @file
  * @brief Buffer resources of the Vulkan backend. Host-visible buffers stay persistently mapped so `write_buffer` and
- * `read_buffer` are memcpys; GPU-only buffers that could not be mapped are written through a staging copy on the
- * immediate command buffer.
+ * `read_buffer` are memcpys; GPU-only buffers that could not be mapped are written through the staging ring and a copy
+ * submitted on the copy queue.
+ * @details **What Tier 4 changed here.** `write_buffer` on GPU-only memory used to be a `vkQueueSubmit` followed by
+ * `vkWaitForFences(..., UINT64_MAX)`: one buffer write in the middle of a frame drained the queue. It now stages into
+ * the ring and returns, and the ordering that the wait used to provide comes from the copy queue's timeline instead -
+ * every later submission on another queue waits on the transfer, on the GPU. See vulkan_transfer.cpp.
+ *
+ * `read_buffer` still blocks, and still waits for every queue, because it hands back bytes and so has nowhere to put
+ * the waiting. `download` in transfer.hpp is the form that does not.
  */
 
 #include "vulkan_backend.hpp"
@@ -29,24 +36,25 @@ namespace catalyst::rendering::detail::vulkan
 
     namespace
     {
-        bool upload_via_staging(device_state &dev, VkBuffer dst, VkDeviceSize offset,
-                                std::span<const std::byte> data) noexcept
+        /** Stages `data` and submits the copy on the copy queue. Does not wait for it. */
+        bool upload_via_staging(device_state &dev, resource_id device_id, VkBuffer dst, VkDeviceSize offset,
+                                std::span<const std::byte> data, const creation_marks &created) noexcept
         {
-            VkBuffer source = VK_NULL_HANDLE;
-            if (!stage_upload(dev, data, source))
-                return false;
-
-            bool ok = false;
-            if (VkCommandBuffer cmd = begin_immediate(dev))
+            const auto point = transfer_once(dev, device_id, data, created,
+                                             [&](VkCommandBuffer cmd, VkBuffer source, VkDeviceSize source_offset) {
+                                                 VkBufferCopy region{};
+                                                 region.srcOffset = source_offset;
+                                                 region.dstOffset = offset;
+                                                 region.size = data.size();
+                                                 vkCmdCopyBuffer(cmd, source, dst, 1, &region);
+                                             });
+            if (!point)
             {
-                VkBufferCopy region{};
-                region.srcOffset = 0;
-                region.dstOffset = offset;
-                region.size = data.size();
-                vkCmdCopyBuffer(cmd, source, dst, 1, &region);
-                ok = end_immediate(dev);
+                logging::error<detail::render_log>("buffer upload of {} bytes failed: {}", data.size(),
+                                                   point.error());
+                return false;
             }
-            return ok;
+            return true;
         }
     } // namespace
 
@@ -68,16 +76,19 @@ namespace catalyst::rendering::detail
         b.desc = desc;
         b.desc.debug_name = nullptr;
         b.debug_name = copy_name(desc.debug_name);
+        // Taken before anything is uploaded: nothing submitted at or before these values can be
+        // reading memory that does not exist yet, so the upload below needs no ordering against it.
+        b.created = marks_now(*dev);
 
         VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         info.size = desc.size_bytes;
         info.usage = to_vk_buffer_usage(desc.usage);
-        info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        apply_sharing(*dev, info);
 
         const VkResult result = vkCreateBuffer(dev->device, &info, nullptr, &b.buffer);
         if (result != VK_SUCCESS)
         {
-            report("create_buffer: vkCreateBuffer failed (%s)", result_string(result));
+            logging::error<detail::render_log>("create_buffer: vkCreateBuffer failed ({})", result_string(result));
             return 0;
         }
 
@@ -95,7 +106,7 @@ namespace catalyst::rendering::detail
                 if (!b.coherent)
                     flush_host_writes(*dev, b.memory);
             }
-            else if (!upload_via_staging(*dev, b.buffer, 0, initial_data))
+            else if (!upload_via_staging(*dev, device, b.buffer, 0, initial_data, b.created))
             {
                 release_buffer_objects(*dev, b);
                 return 0;
@@ -164,7 +175,7 @@ namespace catalyst::rendering::detail
                 flush_host_writes(*dev, b->memory);
             return true;
         }
-        return upload_via_staging(*dev, b->buffer, offset, data);
+        return upload_via_staging(*dev, b->owner, b->buffer, offset, data, b->created);
     }
 
     bool read_buffer(resource_id id, std::size_t offset, std::span<std::byte> out) noexcept
@@ -182,7 +193,14 @@ namespace catalyst::rendering::detail
             return false;
 
         // The GPU writes, the CPU reads: make sure every submission issued so far has finished.
-        wait_for_serial(*dev, dev->last_serial);
+        // All three queues, because nothing here records which of them wrote the buffer. This is
+        // the blocking form, kept deliberately; `download` is the one keyed on a point.
+        for (std::size_t i = 0; i < queue_kind_count; ++i)
+        {
+            const auto kind = static_cast<queue_kind>(i);
+            (void)wait_timeline(*dev, kind, queue_for(*dev, kind).last_submitted,
+                                std::chrono::nanoseconds::max());
+        }
         if (!b->coherent)
             invalidate_host_reads(*dev, b->memory);
 

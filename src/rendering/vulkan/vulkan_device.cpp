@@ -9,13 +9,15 @@
  */
 
 #include "vulkan_backend.hpp"
+
+#include "../detail_sync.hpp"
 #include "vulkan_convert.hpp"
 
 #include <algorithm>
-#include <cstdarg>
-#include <cstdio>
+#include <chrono>
 #include <cstring>
 #include <utility>
+#include <vector>
 
 namespace catalyst::rendering::detail::vulkan
 {
@@ -23,16 +25,6 @@ namespace catalyst::rendering::detail::vulkan
     // -------------------------------------------------------------------------
     // Diagnostics
     // -------------------------------------------------------------------------
-
-    void report(const char *fmt, ...) noexcept
-    {
-        std::fputs("[catalyst.rendering.vulkan] ", stderr);
-        va_list args;
-        va_start(args, fmt);
-        std::vfprintf(stderr, fmt, args);
-        va_end(args);
-        std::fputc('\n', stderr);
-    }
 
     const char *result_string(VkResult result) noexcept
     {
@@ -93,12 +85,18 @@ namespace catalyst::rendering::detail::vulkan
                                                                 const VkDebugUtilsMessengerCallbackDataEXT *data,
                                                                 void * /*user*/)
         {
-            const char *level = "info";
+            // The layer's own severity picks the level, so a caller can filter validation chatter
+            // out with `minimum_level` instead of by not enabling validation at all. Note this runs
+            // on whichever thread tripped the layer, not on the one that created the device.
+            const char *message = data && data->pMessage ? data->pMessage : "";
             if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
-                level = "error";
+                logging::error<detail::render_log>("validation: {}", message);
             else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
-                level = "warning";
-            report("validation %s: %s", level, data && data->pMessage ? data->pMessage : "");
+                logging::warn<detail::render_log>("validation: {}", message);
+            else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
+                logging::info<detail::render_log>("validation: {}", message);
+            else
+                logging::debug<detail::render_log>("validation: {}", message);
             return VK_FALSE;
         }
 
@@ -146,8 +144,9 @@ namespace catalyst::rendering::detail::vulkan
             vkEnumerateInstanceVersion(&loader_version);
             if (loader_version < VK_API_VERSION_1_3)
             {
-                report("create_device: the Vulkan loader only supports %u.%u, 1.3 is required",
-                       VK_API_VERSION_MAJOR(loader_version), VK_API_VERSION_MINOR(loader_version));
+                logging::error<detail::render_log>(
+                    "create_device: the Vulkan loader only supports {}.{}, 1.3 is required",
+                    VK_API_VERSION_MAJOR(loader_version), VK_API_VERSION_MINOR(loader_version));
                 return false;
             }
 
@@ -169,7 +168,8 @@ namespace catalyst::rendering::detail::vulkan
                 if (has_instance_layer("VK_LAYER_KHRONOS_validation"))
                     layers.push_back("VK_LAYER_KHRONOS_validation");
                 else
-                    report("create_device: validation requested but VK_LAYER_KHRONOS_validation is not installed");
+                    logging::error<detail::render_log>(
+                        "create_device: validation requested but VK_LAYER_KHRONOS_validation is not installed");
 
                 if (has_instance_extension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME))
                 {
@@ -182,7 +182,8 @@ namespace catalyst::rendering::detail::vulkan
             {
                 if (!has_instance_extension(ext))
                 {
-                    report("create_device: required instance extension %s is unavailable", ext);
+                    logging::error<detail::render_log>("create_device: required instance extension {} is unavailable",
+                                                       ext);
                     return false;
                 }
             }
@@ -207,7 +208,8 @@ namespace catalyst::rendering::detail::vulkan
             const VkResult result = vkCreateInstance(&info, nullptr, &dev.instance);
             if (result != VK_SUCCESS)
             {
-                report("create_device: vkCreateInstance failed (%s)", result_string(result));
+                logging::error<detail::render_log>("create_device: vkCreateInstance failed ({})",
+                                                   result_string(result));
                 return false;
             }
 
@@ -225,34 +227,86 @@ namespace catalyst::rendering::detail::vulkan
         // Adapter selection
         // ---------------------------------------------------------------------
 
+        struct adapter_families
+        {
+            /** Graphics + compute + present. Required; everything else falls back to it. */
+            std::uint32_t graphics = 0;
+            std::uint32_t compute = 0;
+            std::uint32_t copy = 0;
+            bool compute_dedicated = false;
+            bool copy_dedicated = false;
+        };
+
         struct adapter_candidate
         {
             VkPhysicalDevice physical_device = VK_NULL_HANDLE;
-            std::uint32_t queue_family = 0;
+            adapter_families families{};
             int score = -1;
             VkPhysicalDeviceProperties properties{};
         };
 
-        bool find_queue_family(VkPhysicalDevice pd, std::uint32_t &out_family)
+        /**
+         * Picks one family per queue kind.
+         *
+         * The rule for the two optional ones is the usual Vulkan idiom: a family is a *dedicated*
+         * compute engine when it can compute and cannot draw, and a dedicated copy engine when it
+         * can transfer and can do neither of the other two. Asking it that way rather than taking
+         * the first family that merely advertises the capability is what keeps async compute from
+         * silently resolving back onto the graphics engine on adapters that expose one family with
+         * every bit set.
+         *
+         * Anything not found aliases graphics, which is always correct - a graphics queue accepts
+         * every kind of work - and is reported through `queue_info::dedicated` so a caller can tell.
+         */
+        bool find_queue_families(VkPhysicalDevice pd, adapter_families &out)
         {
             std::uint32_t count = 0;
             vkGetPhysicalDeviceQueueFamilyProperties(pd, &count, nullptr);
             std::vector<VkQueueFamilyProperties> families(count);
             vkGetPhysicalDeviceQueueFamilyProperties(pd, &count, families.data());
 
-            constexpr VkQueueFlags required = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
+            constexpr VkQueueFlags graphics_required = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
+            bool found_graphics = false;
             for (std::uint32_t i = 0; i < count; ++i)
             {
-                if ((families[i].queueFlags & required) != required)
+                if ((families[i].queueFlags & graphics_required) != graphics_required)
                     continue;
 #if defined(VK_USE_PLATFORM_WIN32_KHR)
                 if (!vkGetPhysicalDeviceWin32PresentationSupportKHR(pd, i))
                     continue;
 #endif
-                out_family = i;
-                return true;
+                out.graphics = i;
+                found_graphics = true;
+                break;
             }
-            return false;
+            if (!found_graphics)
+                return false;
+
+            out.compute = out.graphics;
+            out.copy = out.graphics;
+            out.compute_dedicated = false;
+            out.copy_dedicated = false;
+
+            for (std::uint32_t i = 0; i < count; ++i)
+            {
+                const VkQueueFlags flags = families[i].queueFlags;
+                const bool draws = (flags & VK_QUEUE_GRAPHICS_BIT) != 0;
+                const bool computes = (flags & VK_QUEUE_COMPUTE_BIT) != 0;
+                const bool transfers = (flags & (VK_QUEUE_TRANSFER_BIT | VK_QUEUE_GRAPHICS_BIT |
+                                                 VK_QUEUE_COMPUTE_BIT)) != 0;
+
+                if (!out.compute_dedicated && computes && !draws)
+                {
+                    out.compute = i;
+                    out.compute_dedicated = true;
+                }
+                if (!out.copy_dedicated && transfers && !draws && !computes)
+                {
+                    out.copy = i;
+                    out.copy_dedicated = true;
+                }
+            }
+            return true;
         }
 
         bool has_required_features(VkPhysicalDevice pd)
@@ -263,7 +317,10 @@ namespace catalyst::rendering::detail::vulkan
             VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
             f2.pNext = &f12;
             vkGetPhysicalDeviceFeatures2(pd, &f2);
-            return f13.dynamicRendering && f12.descriptorBindingPartiallyBound;
+            // Timeline semaphores are what `timeline_point` is: core since 1.2, and universally
+            // implemented on anything that reports 1.3, but a required feature is worth checking
+            // rather than assuming.
+            return f13.dynamicRendering && f12.descriptorBindingPartiallyBound && f12.timelineSemaphore;
         }
 
         bool pick_adapter(const device_state &dev, adapter_candidate &out)
@@ -271,7 +328,7 @@ namespace catalyst::rendering::detail::vulkan
             std::uint32_t count = 0;
             if (vkEnumeratePhysicalDevices(dev.instance, &count, nullptr) != VK_SUCCESS || count == 0)
             {
-                report("create_device: no Vulkan physical devices found");
+                logging::error<detail::render_log>("create_device: no Vulkan physical devices found");
                 return false;
             }
             std::vector<VkPhysicalDevice> devices(count);
@@ -286,7 +343,7 @@ namespace catalyst::rendering::detail::vulkan
 
                 if (c.properties.apiVersion < VK_API_VERSION_1_3)
                     continue;
-                if (!find_queue_family(pd, c.queue_family))
+                if (!find_queue_families(pd, c.families))
                     continue;
                 if (!has_device_extension(pd, VK_KHR_SWAPCHAIN_EXTENSION_NAME))
                     continue;
@@ -307,8 +364,9 @@ namespace catalyst::rendering::detail::vulkan
 
             if (best.score < 0)
             {
-                report("create_device: no adapter supports Vulkan 1.3 with dynamic rendering, partially bound "
-                       "descriptors and a graphics+compute queue that can present");
+                logging::error<detail::render_log>(
+                    "create_device: no adapter supports Vulkan 1.3 with dynamic rendering, partially bound "
+                    "descriptors, timeline semaphores and a graphics+compute queue that can present");
                 return false;
             }
             out = best;
@@ -322,7 +380,12 @@ namespace catalyst::rendering::detail::vulkan
         bool create_logical_device(device_state &dev, const adapter_candidate &adapter)
         {
             dev.physical_device = adapter.physical_device;
-            dev.queue_family = adapter.queue_family;
+            queue_for(dev, queue_kind::graphics).family = adapter.families.graphics;
+            queue_for(dev, queue_kind::compute).family = adapter.families.compute;
+            queue_for(dev, queue_kind::copy).family = adapter.families.copy;
+            queue_for(dev, queue_kind::graphics).dedicated = true;
+            queue_for(dev, queue_kind::compute).dedicated = adapter.families.compute_dedicated;
+            queue_for(dev, queue_kind::copy).dedicated = adapter.families.copy_dedicated;
             dev.properties = adapter.properties;
             dev.adapter_name = adapter.properties.deviceName;
             vkGetPhysicalDeviceMemoryProperties(dev.physical_device, &dev.memory_properties);
@@ -372,35 +435,86 @@ namespace catalyst::rendering::detail::vulkan
             VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
             f12.pNext = &f13;
             f12.descriptorBindingPartiallyBound = VK_TRUE;
+            f12.timelineSemaphore = VK_TRUE;
             VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
             f2.pNext = &f12;
             f2.features.samplerAnisotropy = supported.samplerAnisotropy;
             f2.features.fillModeNonSolid = supported.fillModeNonSolid;
             f2.features.depthClamp = supported.depthClamp;
 
+            // One VkDeviceQueueCreateInfo per *distinct* family: naming a family twice is invalid,
+            // and on an adapter with no dedicated engines all three kinds collapse onto one entry.
             const float priority = 1.0f;
-            VkDeviceQueueCreateInfo queue_info{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
-            queue_info.queueFamilyIndex = dev.queue_family;
-            queue_info.queueCount = 1;
-            queue_info.pQueuePriorities = &priority;
+            std::vector<VkDeviceQueueCreateInfo> queue_infos;
+            for (const queue_state &q : dev.queues)
+            {
+                const bool already = std::any_of(queue_infos.begin(), queue_infos.end(),
+                                                 [&q](const VkDeviceQueueCreateInfo &existing) {
+                                                     return existing.queueFamilyIndex == q.family;
+                                                 });
+                if (already)
+                    continue;
+
+                VkDeviceQueueCreateInfo queue_info{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
+                queue_info.queueFamilyIndex = q.family;
+                queue_info.queueCount = 1;
+                queue_info.pQueuePriorities = &priority;
+                queue_infos.push_back(queue_info);
+            }
+
+            // The same distinct set, kept for VK_SHARING_MODE_CONCURRENT: a buffer or image that
+            // may be touched by more than one family has to say so at creation, and this backend
+            // does not track ownership transfers.
+            dev.families.clear();
+            for (const VkDeviceQueueCreateInfo &q : queue_infos)
+                dev.families.push_back(q.queueFamilyIndex);
 
             const char *extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
             VkDeviceCreateInfo info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
             info.pNext = &f2;
-            info.queueCreateInfoCount = 1;
-            info.pQueueCreateInfos = &queue_info;
+            info.queueCreateInfoCount = static_cast<std::uint32_t>(queue_infos.size());
+            info.pQueueCreateInfos = queue_infos.data();
             info.enabledExtensionCount = 1;
             info.ppEnabledExtensionNames = extensions;
 
             const VkResult result = vkCreateDevice(dev.physical_device, &info, nullptr, &dev.device);
             if (result != VK_SUCCESS)
             {
-                report("create_device: vkCreateDevice failed (%s)", result_string(result));
+                logging::error<detail::render_log>("create_device: vkCreateDevice failed ({})", result_string(result));
                 return false;
             }
 
-            vkGetDeviceQueue(dev.device, dev.queue_family, 0, &dev.queue);
+            // A timeline semaphore per kind, even where two kinds share a VkQueue: a point then
+            // means the same thing on every adapter, and nothing downstream has to special-case an
+            // aliased queue.
+            VkSemaphoreTypeCreateInfo timeline_type{VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO};
+            timeline_type.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+            timeline_type.initialValue = 0;
+            VkSemaphoreCreateInfo semaphore_info{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+            semaphore_info.pNext = &timeline_type;
+
+            for (std::size_t i = 0; i < queue_kind_count; ++i)
+            {
+                queue_state &q = dev.queues[i];
+                vkGetDeviceQueue(dev.device, q.family, 0, &q.queue);
+
+                const VkResult semaphore_result =
+                    vkCreateSemaphore(dev.device, &semaphore_info, nullptr, &q.timeline);
+                if (semaphore_result != VK_SUCCESS)
+                {
+                    logging::error<detail::render_log>("create_device: vkCreateSemaphore (timeline) failed ({})",
+                                                       result_string(semaphore_result));
+                    return false;
+                }
+            }
+
+            logging::info<detail::render_log>(
+                "queues: graphics family {}, compute family {}{}, copy family {}{}",
+                queue_for(dev, queue_kind::graphics).family, queue_for(dev, queue_kind::compute).family,
+                queue_for(dev, queue_kind::compute).dedicated ? "" : " (aliased)",
+                queue_for(dev, queue_kind::copy).family,
+                queue_for(dev, queue_kind::copy).dedicated ? "" : " (aliased)");
 
             if (dev.debug_utils)
             {
@@ -464,7 +578,8 @@ namespace catalyst::rendering::detail::vulkan
                 const VkResult result = vkCreateDescriptorSetLayout(dev.device, &info, nullptr, &dev.set_layouts[set]);
                 if (result != VK_SUCCESS)
                 {
-                    report("create_device: vkCreateDescriptorSetLayout failed (%s)", result_string(result));
+                    logging::error<detail::render_log>("create_device: vkCreateDescriptorSetLayout failed ({})",
+                                                       result_string(result));
                     return false;
                 }
             }
@@ -483,7 +598,8 @@ namespace catalyst::rendering::detail::vulkan
             const VkResult result = vkCreatePipelineLayout(dev.device, &info, nullptr, &dev.pipeline_layout);
             if (result != VK_SUCCESS)
             {
-                report("create_device: vkCreatePipelineLayout failed (%s)", result_string(result));
+                logging::error<detail::render_log>("create_device: vkCreatePipelineLayout failed ({})",
+                                                   result_string(result));
                 return false;
             }
             return true;
@@ -497,7 +613,7 @@ namespace catalyst::rendering::detail::vulkan
         {
             VkCommandPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
             pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-            pool_info.queueFamilyIndex = dev.queue_family;
+            pool_info.queueFamilyIndex = queue_for(dev, queue_kind::graphics).family;
             if (vkCreateCommandPool(dev.device, &pool_info, nullptr, &dev.immediate_pool) != VK_SUCCESS)
                 return false;
 
@@ -505,11 +621,8 @@ namespace catalyst::rendering::detail::vulkan
             alloc.commandPool = dev.immediate_pool;
             alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
             alloc.commandBufferCount = 1;
-            if (vkAllocateCommandBuffers(dev.device, &alloc, &dev.immediate_cmd) != VK_SUCCESS)
-                return false;
-
-            VkFenceCreateInfo fence_info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-            return vkCreateFence(dev.device, &fence_info, nullptr, &dev.immediate_fence) == VK_SUCCESS;
+            // No fence: the immediate buffer rides the graphics timeline like everything else.
+            return vkAllocateCommandBuffers(dev.device, &alloc, &dev.immediate_cmd) == VK_SUCCESS;
         }
 
         // ---------------------------------------------------------------------
@@ -543,17 +656,17 @@ namespace catalyst::rendering::detail::vulkan
                     g.release();
                 dev.garbage.clear();
 
-                for (submission &s : dev.in_flight)
-                    vkDestroyFence(dev.device, s.fence, nullptr);
-                dev.in_flight.clear();
-                for (VkFence f : dev.free_fences)
-                    vkDestroyFence(dev.device, f, nullptr);
-                dev.free_fences.clear();
+                for (queue_state &q : dev.queues)
+                {
+                    if (q.timeline)
+                        vkDestroySemaphore(dev.device, q.timeline, nullptr);
+                    q.timeline = VK_NULL_HANDLE;
+                }
 
                 release_staging(dev);
+                release_staging_ring(dev);
+                release_transfer_context(dev);
 
-                if (dev.immediate_fence)
-                    vkDestroyFence(dev.device, dev.immediate_fence, nullptr);
                 if (dev.immediate_pool)
                     vkDestroyCommandPool(dev.device, dev.immediate_pool, nullptr);
 
@@ -587,126 +700,258 @@ namespace catalyst::rendering::detail::vulkan
 
     // -------------------------------------------------------------------------
     // Submission tracking
+    //
+    // One timeline semaphore per queue replaces the fence-per-submission scheme this backend used
+    // to run. The bookkeeping is the same shape it always was - a monotonic counter, and a record
+    // of which value each in-flight resource is waiting behind - except that the counter is now the
+    // GPU's own, so it can be waited on by the CPU, waited on by another queue, and handed to the
+    // caller as a `timeline_point` instead of being hidden behind a `bool`.
+    //
+    // What that removed: `VkFence` creation, the free-fence pool, the `in_flight` vector, and the
+    // rule that fences signal in submission order (which is true, and which made the old
+    // `end_immediate` wait for every earlier submission as a side effect nobody asked for).
     // -------------------------------------------------------------------------
 
-    namespace
+    queue_state &queue_for(device_state &dev, queue_kind kind) noexcept
     {
-        VkFence acquire_fence(device_state &dev) noexcept
+        return dev.queues[static_cast<std::size_t>(kind)];
+    }
+
+    const queue_state &queue_for(const device_state &dev, queue_kind kind) noexcept
+    {
+        return dev.queues[static_cast<std::size_t>(kind)];
+    }
+
+    error to_error(device_state &dev, VkResult result, const char *operation) noexcept
+    {
+        error e;
+        e.backend_result = static_cast<std::int32_t>(result);
+        e.backend_result_name = result_string(result);
+        e.operation = operation;
+
+        switch (result)
         {
-            if (!dev.free_fences.empty())
+        case VK_ERROR_DEVICE_LOST:
+            // Latched, and latched here rather than at each call site, because every other entry
+            // point needs to start failing fast from this moment and none of them should have to
+            // remember to check.
+            if (!dev.lost)
             {
-                VkFence f = dev.free_fences.back();
-                dev.free_fences.pop_back();
-                vkResetFences(dev.device, 1, &f);
-                return f;
+                dev.lost = true;
+                logging::error<detail::render_log>("device lost during {}; every handle from it is now dead",
+                                                   operation ? operation : "an unnamed operation");
             }
-            VkFenceCreateInfo info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-            VkFence f = VK_NULL_HANDLE;
-            if (vkCreateFence(dev.device, &info, nullptr, &f) != VK_SUCCESS)
-                return VK_NULL_HANDLE;
-            return f;
+            e.code = error_code::device_lost;
+            break;
+        case VK_ERROR_OUT_OF_DEVICE_MEMORY: e.code = error_code::out_of_device_memory; break;
+        case VK_ERROR_OUT_OF_HOST_MEMORY:   e.code = error_code::out_of_host_memory; break;
+        case VK_ERROR_SURFACE_LOST_KHR:     e.code = error_code::surface_lost; break;
+        case VK_ERROR_OUT_OF_DATE_KHR:      e.code = error_code::swapchain_out_of_date; break;
+        case VK_TIMEOUT:                    e.code = error_code::timeout; break;
+        case VK_NOT_READY:                  e.code = error_code::not_ready; break;
+        case VK_ERROR_FORMAT_NOT_SUPPORTED: e.code = error_code::unsupported_format; break;
+        default:                            e.code = error_code::platform_error; break;
         }
+        return e;
+    }
 
-        void collect_garbage(device_state &dev) noexcept
-        {
-            std::erase_if(dev.garbage, [&](deferred_release &g) {
-                if (g.serial > dev.completed_serial)
-                    return false;
-                g.release();
-                return true;
-            });
-        }
-    } // namespace
-
-    std::uint64_t submit_batch(device_state &dev, std::span<const VkCommandBuffer> commands,
-                               std::span<const VkSemaphore> waits, std::span<const VkPipelineStageFlags> wait_stages,
-                               std::span<const VkSemaphore> signals) noexcept
+    void refresh_completed(device_state &dev) noexcept
     {
-        VkFence fence = acquire_fence(dev);
-        if (!fence)
-            return 0;
+        if (!dev.device || dev.lost)
+            return;
+        for (queue_state &q : dev.queues)
+        {
+            if (!q.timeline)
+                continue;
+            std::uint64_t value = 0;
+            const VkResult result = vkGetSemaphoreCounterValue(dev.device, q.timeline, &value);
+            if (result != VK_SUCCESS)
+            {
+                to_error(dev, result, "vkGetSemaphoreCounterValue");
+                return;
+            }
+            // Never let it move backwards; a torn read would retire garbage still in use.
+            if (value > q.completed)
+                q.completed = value;
+        }
+    }
+
+    void collect_garbage(device_state &dev) noexcept
+    {
+        refresh_completed(dev);
+
+        // A lost device never signals again, so waiting for its timelines would leak everything.
+        // Releasing now is safe: the driver has already abandoned the work that was reading it.
+        const bool lost = dev.lost;
+
+        std::erase_if(dev.garbage, [&](deferred_release &g) {
+            if (!lost)
+            {
+                for (std::size_t i = 0; i < queue_kind_count; ++i)
+                {
+                    if (g.points[i] > dev.queues[i].completed)
+                        return false;
+                }
+            }
+            g.release();
+            return true;
+        });
+    }
+
+    std::expected<std::uint64_t, error> submit_batch(device_state &dev, const submit_batch_info &batch) noexcept
+    {
+        if (dev.lost)
+            return std::unexpected(make_error(error_code::device_lost, "submit"));
+
+        queue_state &q = queue_for(dev, batch.kind);
+        const std::uint64_t signalled = q.last_submitted + 1;
+
+        // Binary semaphores first, then timeline ones. Vulkan reads one parallel array of values
+        // covering both, and simply ignores the entries belonging to binary semaphores - which is
+        // why the swapchain's acquire and present semaphores can ride along in the same submission
+        // as a cross-queue dependency without either knowing about the other.
+        std::vector<VkSemaphore> waits{batch.binary_waits.begin(), batch.binary_waits.end()};
+        std::vector<VkPipelineStageFlags> stages{batch.wait_stages.begin(), batch.wait_stages.end()};
+        std::vector<std::uint64_t> wait_values(waits.size(), 0);
+
+        const auto add_timeline_wait = [&](queue_kind source_kind, std::uint64_t value) {
+            if (value == 0)
+                return;
+            const queue_state &source = queue_for(dev, source_kind);
+            if (!source.timeline || value <= source.completed)
+                return; // Already done: waiting on it would cost a semaphore slot for nothing.
+            waits.push_back(source.timeline);
+            stages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+            wait_values.push_back(value);
+        };
+
+        for (const timeline_point &point : batch.timeline_waits)
+        {
+            if (!point.valid())
+                continue; // "No dependency", so the caller does not need a branch.
+            add_timeline_wait(point.queue(), point.value());
+        }
+
+        // Read-after-write against the transfer queue, added for every submission that is not
+        // itself a transfer. This is what lets `write_buffer` be asynchronous without making the
+        // caller order it: the data is uploaded on the copy queue, and anything submitted
+        // afterwards waits for it on the GPU. Free once the copy has completed, which by the next
+        // frame it usually has.
+        if (batch.kind != queue_kind::copy)
+            add_timeline_wait(queue_kind::copy, dev.last_transfer);
+
+        std::vector<VkSemaphore> signals{batch.binary_signals.begin(), batch.binary_signals.end()};
+        std::vector<std::uint64_t> signal_values(signals.size(), 0);
+        signals.push_back(q.timeline);
+        signal_values.push_back(signalled);
+
+        VkTimelineSemaphoreSubmitInfo timeline{VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO};
+        timeline.waitSemaphoreValueCount = static_cast<std::uint32_t>(wait_values.size());
+        timeline.pWaitSemaphoreValues = wait_values.data();
+        timeline.signalSemaphoreValueCount = static_cast<std::uint32_t>(signal_values.size());
+        timeline.pSignalSemaphoreValues = signal_values.data();
 
         VkSubmitInfo info{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        info.pNext = &timeline;
         info.waitSemaphoreCount = static_cast<std::uint32_t>(waits.size());
         info.pWaitSemaphores = waits.data();
-        info.pWaitDstStageMask = wait_stages.data();
-        info.commandBufferCount = static_cast<std::uint32_t>(commands.size());
-        info.pCommandBuffers = commands.data();
+        info.pWaitDstStageMask = stages.data();
+        info.commandBufferCount = static_cast<std::uint32_t>(batch.commands.size());
+        info.pCommandBuffers = batch.commands.data();
         info.signalSemaphoreCount = static_cast<std::uint32_t>(signals.size());
         info.pSignalSemaphores = signals.data();
 
-        const VkResult result = vkQueueSubmit(dev.queue, 1, &info, fence);
+        const VkResult result = vkQueueSubmit(q.queue, 1, &info, VK_NULL_HANDLE);
         if (result != VK_SUCCESS)
-        {
-            report("submit: vkQueueSubmit failed (%s)", result_string(result));
-            dev.free_fences.push_back(fence);
-            return 0;
-        }
+            return std::unexpected(to_error(dev, result, "vkQueueSubmit"));
 
-        const std::uint64_t serial = ++dev.last_serial;
-        dev.in_flight.push_back({fence, serial});
-        poll_submissions(dev);
-        return serial;
-    }
-
-    void poll_submissions(device_state &dev) noexcept
-    {
-        std::size_t retired = 0;
-        for (const submission &s : dev.in_flight)
-        {
-            if (vkGetFenceStatus(dev.device, s.fence) != VK_SUCCESS)
-                break; // Fences on one queue signal in submission order.
-            dev.completed_serial = s.serial;
-            dev.free_fences.push_back(s.fence);
-            ++retired;
-        }
-        dev.in_flight.erase(dev.in_flight.begin(), dev.in_flight.begin() + static_cast<std::ptrdiff_t>(retired));
+        q.last_submitted = signalled;
         collect_garbage(dev);
+        return signalled;
     }
 
-    void wait_for_serial(device_state &dev, std::uint64_t serial) noexcept
+    std::expected<void, error> wait_timeline(device_state &dev, queue_kind kind, std::uint64_t value,
+                                             std::chrono::nanoseconds timeout) noexcept
     {
-        if (serial == 0 || serial <= dev.completed_serial)
-            return;
+        if (value == 0)
+            return {};
+        if (dev.lost)
+            return std::unexpected(make_error(error_code::device_lost, "wait"));
 
-        std::vector<VkFence> fences;
-        for (const submission &s : dev.in_flight)
+        queue_state &q = queue_for(dev, kind);
+        if (value <= q.completed)
+            return {};
+        if (!q.timeline || value > q.last_submitted)
         {
-            if (s.serial <= serial)
-                fences.push_back(s.fence);
+            // Nothing will ever signal this: it names work that was never submitted.
+            return std::unexpected(make_error(error_code::invalid_argument, "wait"));
         }
-        if (!fences.empty())
-            vkWaitForFences(dev.device, static_cast<std::uint32_t>(fences.size()), fences.data(), VK_TRUE, UINT64_MAX);
-        poll_submissions(dev);
+
+        // Vulkan takes an unsigned nanosecond count with UINT64_MAX meaning "no deadline", which is
+        // exactly what a maximal or negative std::chrono duration means here.
+        std::uint64_t ns = UINT64_MAX;
+        if (timeout >= std::chrono::nanoseconds::zero() && timeout < std::chrono::nanoseconds::max())
+            ns = static_cast<std::uint64_t>(timeout.count());
+
+        VkSemaphoreWaitInfo info{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+        info.semaphoreCount = 1;
+        info.pSemaphores = &q.timeline;
+        info.pValues = &value;
+
+        const VkResult result = vkWaitSemaphores(dev.device, &info, ns);
+        if (result == VK_SUCCESS)
+        {
+            if (value > q.completed)
+                q.completed = value;
+            collect_garbage(dev);
+            return {};
+        }
+        return std::unexpected(to_error(dev, result, "vkWaitSemaphores"));
     }
 
     void wait_all(device_state &dev) noexcept
     {
-        vkDeviceWaitIdle(dev.device);
-        poll_submissions(dev);
-        // Everything has completed even if a fence poll raced; retire whatever is left.
-        for (const submission &s : dev.in_flight)
+        if (!dev.device)
+            return;
+        if (!dev.lost)
         {
-            dev.completed_serial = s.serial;
-            dev.free_fences.push_back(s.fence);
+            const VkResult result = vkDeviceWaitIdle(dev.device);
+            if (result != VK_SUCCESS)
+                to_error(dev, result, "vkDeviceWaitIdle");
         }
-        dev.in_flight.clear();
+        // Everything submitted has completed, whether the driver told us the counter values or the
+        // device died taking the work with it. Either way nothing is still reading a resource.
+        for (queue_state &q : dev.queues)
+            q.completed = q.last_submitted;
         collect_garbage(dev);
     }
 
     void defer_release(device_state &dev, std::function<void()> release)
     {
-        poll_submissions(dev);
-        if (dev.in_flight.empty())
+        refresh_completed(dev);
+
+        deferred_release entry;
+        bool outstanding = false;
+        for (std::size_t i = 0; i < queue_kind_count; ++i)
+        {
+            entry.points[i] = dev.queues[i].last_submitted;
+            if (!dev.lost && entry.points[i] > dev.queues[i].completed)
+                outstanding = true;
+        }
+
+        if (!outstanding)
         {
             release();
             return;
         }
-        dev.garbage.push_back({dev.last_serial, std::move(release)});
+        entry.release = std::move(release);
+        dev.garbage.push_back(std::move(entry));
     }
 
     VkCommandBuffer begin_immediate(device_state &dev) noexcept
     {
+        if (dev.lost)
+            return VK_NULL_HANDLE;
         if (vkResetCommandPool(dev.device, dev.immediate_pool, 0) != VK_SUCCESS)
             return VK_NULL_HANDLE;
 
@@ -726,21 +971,15 @@ namespace catalyst::rendering::detail::vulkan
         if (vkEndCommandBuffer(dev.immediate_cmd) != VK_SUCCESS)
             return false;
 
-        vkResetFences(dev.device, 1, &dev.immediate_fence);
-
-        VkSubmitInfo info{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-        info.commandBufferCount = 1;
-        info.pCommandBuffers = &dev.immediate_cmd;
-        const VkResult result = vkQueueSubmit(dev.queue, 1, &info, dev.immediate_fence);
-        if (result != VK_SUCCESS)
-        {
-            report("immediate submit: vkQueueSubmit failed (%s)", result_string(result));
+        // Still a blocking round trip - that is Tier 4's problem, not this one. What changed is
+        // that it now waits for exactly its own submission instead of for every fence issued
+        // before it, which is what waiting on an ordered fence list used to mean.
+        const VkCommandBuffer commands[] = {dev.immediate_cmd};
+        const auto value = submit_batch(dev, {.kind = queue_kind::graphics, .commands = commands});
+        if (!value)
             return false;
-        }
 
-        vkWaitForFences(dev.device, 1, &dev.immediate_fence, VK_TRUE, UINT64_MAX);
-        poll_submissions(dev); // Earlier submissions are complete too (fences signal in submission order).
-        return true;
+        return wait_timeline(dev, queue_kind::graphics, *value, std::chrono::nanoseconds::max()).has_value();
     }
 
     void full_barrier(VkCommandBuffer cmd) noexcept
@@ -774,7 +1013,8 @@ namespace catalyst::rendering::detail
 
         adapter_candidate adapter;
         const bool ok = create_instance(dev) && pick_adapter(dev, adapter) && create_logical_device(dev, adapter) &&
-                        create_pipeline_layout(dev) && create_immediate_objects(dev);
+                        create_pipeline_layout(dev) && create_immediate_objects(dev) &&
+                        create_staging_ring(dev, dev.desc.staging_ring_bytes);
         if (!ok)
         {
             destroy_device_objects(dev);
@@ -799,7 +1039,12 @@ namespace catalyst::rendering::detail
         wait_all(*dev);
 
         registry &r = reg();
+        // Downloads and batches first: both hold command buffers and mapped memory that the pools
+        // and the ring below are about to take away.
+        release_owned(r.downloads, id, [&](download_state &d) { release_download_objects(*dev, d); });
+        release_owned(r.transfer_batches, id, [](transfer_batch_state &) {});
         release_owned(r.command_lists, id, [&](command_list_state &cl) { release_command_list_objects(*dev, cl); });
+        release_owned(r.command_pools, id, [&](command_pool_state &pool) { release_command_pool_objects(*dev, pool); });
         release_owned(r.swapchains, id, [&](swapchain_state &sc) { release_swapchain_objects(*dev, sc); });
         release_owned(r.pipelines, id, [&](pipeline_state &p) { release_pipeline_objects(*dev, p); });
         release_owned(r.samplers, id, [&](sampler_state &s) { release_sampler_objects(*dev, s); });
@@ -830,10 +1075,141 @@ namespace catalyst::rendering::detail
         return info;
     }
 
+    bool is_device_lost(resource_id id) noexcept
+    {
+        const device_state *dev = find_device(id);
+        return dev != nullptr && dev->lost;
+    }
+
     void wait_idle(resource_id id) noexcept
     {
+        // Called with no lock held - see detail_backend.hpp. `vkDeviceWaitIdle` is where teardown
+        // and resize block, and holding the module lock across it would stall every other thread
+        // for the length of the GPU's queue.
+        VkDevice device = VK_NULL_HANDLE;
+        {
+            const exclusive_guard guard;
+            device_state *dev = find_device(id);
+            if (!dev || !dev->device)
+                return;
+            if (dev->lost)
+            {
+                wait_all(*dev); // Does not touch the driver; just settles the bookkeeping.
+                return;
+            }
+            device = dev->device;
+        }
+
+        const VkResult result = vkDeviceWaitIdle(device);
+
+        const exclusive_guard guard;
+        device_state *dev = find_device(id);
+        if (!dev)
+            return; // Destroyed while we waited, which the threading rules forbid but do not prevent.
+        if (result != VK_SUCCESS)
+            to_error(*dev, result, "vkDeviceWaitIdle");
+        for (queue_state &q : dev->queues)
+            q.completed = q.last_submitted;
+        vulkan::collect_garbage(*dev);
+    }
+
+    void collect_garbage(resource_id id) noexcept
+    {
         if (device_state *dev = find_device(id))
-            wait_all(*dev);
+            vulkan::collect_garbage(*dev);
+    }
+
+    // -------------------------------------------------------------------------
+    // Backend contract: queues and timelines
+    // -------------------------------------------------------------------------
+
+    queue_info get_queue_info(resource_id device, queue_kind kind) noexcept
+    {
+        queue_info info;
+        info.kind = kind;
+        const device_state *dev = find_device(device);
+        if (!dev)
+            return info;
+
+        const queue_state &q = queue_for(*dev, kind);
+        info.dedicated = q.dedicated;
+        info.family_index = q.family;
+        return info;
+    }
+
+    std::uint64_t queue_last_submitted(resource_id device, queue_kind kind) noexcept
+    {
+        const device_state *dev = find_device(device);
+        return dev ? queue_for(*dev, kind).last_submitted : 0;
+    }
+
+    std::uint64_t queue_completed(resource_id device, queue_kind kind) noexcept
+    {
+        device_state *dev = find_device(device);
+        if (!dev)
+            return 0;
+        // Reading the counter is a cheap driver call and the caller asked for the truth, not for
+        // whatever the last submission happened to leave cached.
+        refresh_completed(*dev);
+        return queue_for(*dev, kind).completed;
+    }
+
+    std::expected<void, error> queue_wait(resource_id device, queue_kind kind, std::uint64_t value,
+                                          std::chrono::nanoseconds timeout) noexcept
+    {
+        if (value == 0)
+            return {};
+
+        // Called with no lock held. The pattern is resolve, unlock, block, relock: `vkWaitSemaphores`
+        // is thread-safe by specification, so the only thing that needs the lock is reading the
+        // handles out of the registry and writing the result back into it.
+        VkDevice vk_device = VK_NULL_HANDLE;
+        VkSemaphore semaphore = VK_NULL_HANDLE;
+        {
+            const shared_guard guard;
+            device_state *dev = find_device(device);
+            if (!dev)
+                return std::unexpected(make_error(error_code::invalid_argument, "wait"));
+            if (dev->lost)
+                return std::unexpected(make_error(error_code::device_lost, "wait"));
+
+            const queue_state &q = queue_for(*dev, kind);
+            if (value <= q.completed)
+                return {};
+            if (!q.timeline || value > q.last_submitted)
+            {
+                // Nothing will ever signal this: it names work that was never submitted.
+                return std::unexpected(make_error(error_code::invalid_argument, "wait"));
+            }
+            vk_device = dev->device;
+            semaphore = q.timeline;
+        }
+
+        // Vulkan takes an unsigned nanosecond count with UINT64_MAX meaning "no deadline", which is
+        // exactly what a maximal or negative std::chrono duration means here.
+        std::uint64_t ns = UINT64_MAX;
+        if (timeout >= std::chrono::nanoseconds::zero() && timeout < std::chrono::nanoseconds::max())
+            ns = static_cast<std::uint64_t>(timeout.count());
+
+        VkSemaphoreWaitInfo info{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+        info.semaphoreCount = 1;
+        info.pSemaphores = &semaphore;
+        info.pValues = &value;
+
+        const VkResult result = vkWaitSemaphores(vk_device, &info, ns);
+
+        const exclusive_guard guard;
+        device_state *dev = find_device(device);
+        if (!dev)
+            return std::unexpected(make_error(error_code::invalid_argument, "wait"));
+        if (result != VK_SUCCESS)
+            return std::unexpected(to_error(*dev, result, "vkWaitSemaphores"));
+
+        queue_state &q = queue_for(*dev, kind);
+        if (value > q.completed)
+            q.completed = value;
+        vulkan::collect_garbage(*dev);
+        return {};
     }
 
 } // namespace catalyst::rendering::detail

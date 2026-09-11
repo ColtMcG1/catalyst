@@ -10,6 +10,7 @@
 #include <catalyst/rendering/pipeline.hpp>
 
 #include "detail_backend.hpp"
+#include "detail_sync.hpp"
 
 #include <algorithm>
 
@@ -74,6 +75,10 @@ namespace catalyst::rendering
         if (desc.depth_format != format::unknown && !is_depth_format(desc.depth_format))
             return {};
 
+        // Taken here rather than at the top: the validation above calls back into the public API
+        // (`is_valid`, `get_shader_stage`), each of which takes the lock in shared mode, and a
+        // shared lock is not reentrant.
+        const detail::exclusive_guard guard;
         return pipeline{detail::create_graphics_pipeline(dev.id(), desc)};
     }
 
@@ -83,6 +88,7 @@ namespace catalyst::rendering
             return {};
         if (get_shader_stage(desc.compute_shader) != shader_stage::compute)
             return {};
+        const detail::exclusive_guard guard;
         return pipeline{detail::create_compute_pipeline(dev.id(), desc)};
     }
 
@@ -90,19 +96,26 @@ namespace catalyst::rendering
     {
         if (!p)
             return;
-        detail::destroy_pipeline(p.id());
+        {
+            const detail::exclusive_guard guard;
+            detail::destroy_pipeline(p.id());
+        }
         p = pipeline{};
     }
 
     bool is_valid(const pipeline &p) noexcept
     {
-        return p && detail::is_pipeline_valid(p.id());
+        if (!p)
+            return false;
+        const detail::shared_guard guard;
+        return detail::is_pipeline_valid(p.id());
     }
 
     pipeline_type get_pipeline_type(const pipeline &p) noexcept
     {
         if (!p)
             return pipeline_type::graphics;
+        const detail::shared_guard guard;
         return detail::get_pipeline_type(p.id());
     }
 

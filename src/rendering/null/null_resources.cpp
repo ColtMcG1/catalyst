@@ -12,6 +12,7 @@
 #include "../detail_backend.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <string>
 #include <unordered_map>
@@ -30,6 +31,25 @@ namespace catalyst::rendering::detail
         {
             device_desc desc;
             std::string application_name;
+
+            /**
+             * One timeline per queue kind. There is no GPU, so a submission completes the instant
+             * it is made and `completed` is simply the last value handed out - which is the right
+             * answer rather than a shortcut: the bookkeeping backend really has finished.
+             *
+             * The values still increase, and still differ per queue, so a test can check that
+             * points are ordered within a timeline and unordered across timelines without needing
+             * hardware.
+             */
+            std::array<std::uint64_t, queue_kind_count> timelines{};
+
+            /**
+             * The staging budget, modelled but not allocated. Transfers complete immediately, so
+             * `in_use` only ever holds what open batches have staged - which is enough for
+             * `staging_exhausted` to be reachable, and therefore testable, with no GPU.
+             */
+            std::uint64_t staging_capacity = 0;
+            std::uint64_t staging_in_use = 0;
         };
 
         struct buffer_state
@@ -90,16 +110,52 @@ namespace catalyst::rendering::detail
             std::size_t size = 0;
         };
 
+        struct command_pool_state
+        {
+            resource_id owner = 0;
+            command_pool_desc desc;
+            std::string debug_name;
+            std::vector<resource_id> lists;
+            /** True for the private pool a `create_command_list(device, ...)` list owns. */
+            bool implicit = false;
+        };
+
         struct command_list_state
         {
             resource_id owner = 0;
             command_list_desc desc;
+            std::string debug_name;
+            resource_id pool_id = 0;
             bool recording = false;
             bool ready = false;
             bool in_render_pass = false;
             resource_id bound_pipeline = 0;
             std::size_t command_count = 0;
             std::vector<pending_copy> copies;
+            /** Recorded since the pool was last reset. Work here completes before `submit` returns,
+             * so a list is never "in flight" - but the record-once-per-reset rule is the same one
+             * the Vulkan backend enforces, and enforcing it here is how CI catches a caller
+             * breaking it without a GPU. */
+            bool recorded = false;
+            timeline_point last_submit{};
+        };
+
+        /**
+         * One open `transfer_batch`. There is no GPU, so an upload is a memcpy that has already
+         * happened by the time it returns; what the batch still has to model faithfully is the
+         * staging budget, so that `error_code::staging_exhausted` is reachable in a test.
+         */
+        struct transfer_batch_state
+        {
+            resource_id owner = 0;
+            std::uint64_t staged = 0;
+            std::size_t count = 0;
+        };
+
+        struct download_state
+        {
+            resource_id owner = 0;
+            std::vector<std::byte> data;
         };
 
         // ---------------------------------------------------------------------
@@ -115,7 +171,10 @@ namespace catalyst::rendering::detail
         std::unordered_map<resource_id, sampler_state> g_samplers;
         std::unordered_map<resource_id, pipeline_state> g_pipelines;
         std::unordered_map<resource_id, swapchain_state> g_swapchains;
+        std::unordered_map<resource_id, command_pool_state> g_command_pools;
         std::unordered_map<resource_id, command_list_state> g_command_lists;
+        std::unordered_map<resource_id, transfer_batch_state> g_transfer_batches;
+        std::unordered_map<resource_id, download_state> g_downloads;
 
         resource_id allocate_id() noexcept
         {
@@ -215,6 +274,7 @@ namespace catalyst::rendering::detail
     {
         device_state s;
         s.desc = desc;
+        s.staging_capacity = desc.staging_ring_bytes != 0 ? desc.staging_ring_bytes : 16ull * 1024ull * 1024ull;
         s.application_name = copy_name(desc.application_name);
 
         const resource_id id = allocate_id();
@@ -227,7 +287,10 @@ namespace catalyst::rendering::detail
         if (!find(g_devices, id))
             return;
 
+        erase_owned_by(g_downloads, id);
+        erase_owned_by(g_transfer_batches, id);
         erase_owned_by(g_command_lists, id);
+        erase_owned_by(g_command_pools, id);
         erase_owned_by(g_swapchains, id);
         erase_owned_by(g_pipelines, id);
         erase_owned_by(g_samplers, id);
@@ -253,8 +316,69 @@ namespace catalyst::rendering::detail
         return info;
     }
 
+    bool is_device_lost(resource_id /*id*/) noexcept
+    {
+        // Nothing here can be removed, reset or hung by a driver, so this is honestly always false.
+        return false;
+    }
+
     void wait_idle(resource_id /*id*/) noexcept
     {
+    }
+
+    void collect_garbage(resource_id /*device*/) noexcept
+    {
+        // Resources are released the moment they are destroyed: nothing is ever in flight.
+    }
+
+    staging_info get_staging_info(resource_id id) noexcept
+    {
+        staging_info info;
+        const device_state *dev = find(g_devices, id);
+        if (!dev)
+            return info;
+        info.capacity_bytes = dev->staging_capacity;
+        info.in_use_bytes = dev->staging_in_use;
+        info.largest_transfer_bytes = dev->staging_capacity;
+        return info;
+    }
+
+    // -------------------------------------------------------------------------
+    // Queues and timelines
+    // -------------------------------------------------------------------------
+
+    queue_info get_queue_info(resource_id device, queue_kind kind) noexcept
+    {
+        queue_info info;
+        info.kind = kind;
+        if (!find(g_devices, device))
+            return info;
+        // One imaginary engine runs everything, so only graphics is its own. Reporting compute and
+        // copy as aliased keeps the fallback path - the one a caller hits on adapters with no DMA
+        // engine - exercised on every machine, including the ones in CI with no GPU at all.
+        info.dedicated = kind == queue_kind::graphics;
+        info.family_index = 0;
+        return info;
+    }
+
+    std::uint64_t queue_last_submitted(resource_id device, queue_kind kind) noexcept
+    {
+        const device_state *dev = find(g_devices, device);
+        return dev ? dev->timelines[static_cast<std::size_t>(kind)] : 0;
+    }
+
+    std::uint64_t queue_completed(resource_id device, queue_kind kind) noexcept
+    {
+        // Everything submitted has completed; see device_state::timelines.
+        return queue_last_submitted(device, kind);
+    }
+
+    std::expected<void, error> queue_wait(resource_id device, queue_kind /*kind*/, std::uint64_t /*value*/,
+                                          std::chrono::nanoseconds /*timeout*/) noexcept
+    {
+        if (!find(g_devices, device))
+            return std::unexpected(make_error(error_code::invalid_argument, "queue_wait"));
+        return {};
     }
 
     // -------------------------------------------------------------------------
@@ -580,24 +704,142 @@ namespace catalyst::rendering::detail
     // Command lists
     // -------------------------------------------------------------------------
 
+    resource_id create_command_pool(resource_id device, const command_pool_desc &desc)
+    {
+        if (!find(g_devices, device))
+            return 0;
+
+        command_pool_state s;
+        s.owner = device;
+        s.desc = desc;
+        s.desc.debug_name = nullptr;
+        s.debug_name = copy_name(desc.debug_name);
+
+        const resource_id id = allocate_id();
+        g_command_pools.emplace(id, std::move(s));
+        return id;
+    }
+
+    void destroy_command_pool(resource_id id) noexcept
+    {
+        command_pool_state *pool = find(g_command_pools, id);
+        if (!pool)
+            return;
+        for (const resource_id list_id : pool->lists)
+            g_command_lists.erase(list_id);
+        g_command_pools.erase(id);
+    }
+
+    bool is_command_pool_valid(resource_id id) noexcept
+    {
+        return find(g_command_pools, id) != nullptr;
+    }
+
+    command_pool_desc get_command_pool_desc(resource_id id) noexcept
+    {
+        const command_pool_state *pool = find(g_command_pools, id);
+        if (!pool)
+            return {};
+        command_pool_desc desc = pool->desc;
+        desc.debug_name = name_or_null(pool->debug_name);
+        return desc;
+    }
+
+    resource_id get_command_pool_device(resource_id id) noexcept
+    {
+        const command_pool_state *pool = find(g_command_pools, id);
+        return pool ? pool->owner : 0;
+    }
+
+    std::expected<void, error> reset_command_pool(resource_id id)
+    {
+        command_pool_state *pool = find(g_command_pools, id);
+        if (!pool)
+            return std::unexpected(make_error(error_code::invalid_argument, "reset_command_pool"));
+
+        // Never `not_ready`: work completes before `submit` returns, so no list from this pool can
+        // still be executing. The rest of the reset is the same as everywhere else.
+        for (const resource_id list_id : pool->lists)
+        {
+            command_list_state *cl = find(g_command_lists, list_id);
+            if (!cl)
+                continue;
+            cl->recording = false;
+            cl->ready = false;
+            cl->recorded = false;
+            cl->in_render_pass = false;
+            cl->command_count = 0;
+            cl->copies.clear();
+            cl->last_submit = {};
+        }
+        return {};
+    }
+
+    resource_id create_command_list_in_pool(resource_id pool_id, const char *debug_name)
+    {
+        command_pool_state *pool = find(g_command_pools, pool_id);
+        if (!pool)
+            return 0;
+
+        command_list_state s;
+        s.owner = pool->owner;
+        s.desc.queue = pool->desc.queue;
+        s.debug_name = copy_name(debug_name);
+        s.pool_id = pool_id;
+
+        const resource_id id = allocate_id();
+        g_command_lists.emplace(id, std::move(s));
+        pool->lists.push_back(id);
+        return id;
+    }
+
     resource_id create_command_list(resource_id device, const command_list_desc &desc)
     {
         if (!find(g_devices, device))
             return 0;
 
+        // A private pool with one list in it, so `begin_recording` may recycle it by itself.
+        command_pool_state pool;
+        pool.owner = device;
+        pool.desc.queue = desc.queue;
+        pool.implicit = true;
+
+        const resource_id pool_id = allocate_id();
+
         command_list_state s;
         s.owner = device;
         s.desc = desc;
         s.desc.debug_name = nullptr;
+        s.debug_name = copy_name(desc.debug_name);
+        s.pool_id = pool_id;
 
         const resource_id id = allocate_id();
         g_command_lists.emplace(id, std::move(s));
+        pool.lists.push_back(id);
+        g_command_pools.emplace(pool_id, std::move(pool));
         return id;
     }
 
     void destroy_command_list(resource_id id) noexcept
     {
+        const command_list_state *cl = find(g_command_lists, id);
+        if (!cl)
+            return;
+        const resource_id pool_id = cl->pool_id;
         g_command_lists.erase(id);
+
+        if (command_pool_state *pool = find(g_command_pools, pool_id))
+        {
+            std::erase(pool->lists, id);
+            if (pool->implicit && pool->lists.empty())
+                g_command_pools.erase(pool_id);
+        }
+    }
+
+    timeline_point command_list_last_submission(resource_id id) noexcept
+    {
+        const command_list_state *cl = find(g_command_lists, id);
+        return cl ? cl->last_submit : timeline_point{};
     }
 
     bool is_command_list_valid(resource_id id) noexcept
@@ -605,17 +847,37 @@ namespace catalyst::rendering::detail
         return find(g_command_lists, id) != nullptr;
     }
 
+    command_list_desc get_command_list_desc(resource_id id) noexcept
+    {
+        const command_list_state *cl = find(g_command_lists, id);
+        if (!cl)
+            return {};
+        command_list_desc desc = cl->desc;
+        desc.debug_name = name_or_null(cl->debug_name);
+        return desc;
+    }
+
     bool begin_recording(resource_id id)
     {
         command_list_state *cl = find(g_command_lists, id);
         if (!cl || cl->recording)
             return false;
+
+        const command_pool_state *pool = find(g_command_pools, cl->pool_id);
+        // Nothing is ever in flight here, so the only refusal left is the record-once-per-reset
+        // rule - which is enforced anyway, because a caller who breaks it would find out on the
+        // first machine with a GPU otherwise.
+        if (pool && !pool->implicit && cl->recorded)
+            return false;
+
         cl->recording = true;
         cl->ready = false;
+        cl->recorded = true;
         cl->in_render_pass = false;
         cl->bound_pipeline = 0;
         cl->command_count = 0;
         cl->copies.clear();
+        cl->last_submit = {};
         return true;
     }
 
@@ -637,7 +899,7 @@ namespace catalyst::rendering::detail
     void begin_render_pass(resource_id id, const render_pass_desc &desc) noexcept
     {
         command_list_state *cl = recording_list(id);
-        if (!cl || cl->in_render_pass || cl->desc.queue != queue_type::graphics)
+        if (!cl || cl->in_render_pass || !queue_accepts(cl->desc.queue, queue_kind::graphics))
             return;
         if (desc.color_attachments.size() > max_color_attachments)
             return;
@@ -776,7 +1038,7 @@ namespace catalyst::rendering::detail
     void dispatch(resource_id id, std::uint32_t /*x*/, std::uint32_t /*y*/, std::uint32_t /*z*/) noexcept
     {
         command_list_state *cl = recording_list(id);
-        if (!cl || cl->in_render_pass || cl->desc.queue == queue_type::transfer)
+        if (!cl || cl->in_render_pass || !queue_accepts(cl->desc.queue, queue_kind::compute))
             return;
         const pipeline_state *p = find(g_pipelines, cl->bound_pipeline);
         if (!p || p->type != pipeline_type::compute)
@@ -802,17 +1064,23 @@ namespace catalyst::rendering::detail
         record(*cl);
     }
 
-    bool submit(resource_id device, std::span<const command_list> lists)
+    std::expected<std::uint64_t, error> submit(resource_id device, queue_kind kind,
+                                               std::span<const command_list> lists,
+                                               std::span<const timeline_point> /*waits*/)
     {
-        if (!find(g_devices, device))
-            return false;
+        device_state *dev = find(g_devices, device);
+        if (!dev)
+            return std::unexpected(make_error(error_code::invalid_argument, "submit"));
 
         for (const command_list &handle : lists)
         {
             const command_list_state *cl = find(g_command_lists, handle.id());
             if (!cl || cl->owner != device || !cl->ready || cl->recording)
-                return false;
+                return std::unexpected(make_error(error_code::invalid_argument, "submit"));
         }
+
+        // `waits` needs nothing: work completes before this function returns, so every dependency
+        // named by a point on this device is already satisfied by the time it would be checked.
 
         // "Execute": the only observable work the bookkeeping backend performs is buffer-to-buffer copies.
         for (const command_list &handle : lists)
@@ -831,7 +1099,176 @@ namespace catalyst::rendering::detail
             }
         }
 
-        return true;
+        const std::uint64_t value = ++dev->timelines[static_cast<std::size_t>(kind)];
+        for (const command_list &handle : lists)
+        {
+            if (command_list_state *cl = find(g_command_lists, handle.id()))
+                cl->last_submit = timeline_point{rendering::device{device}, kind, value};
+        }
+        return value;
+    }
+
+    // -------------------------------------------------------------------------
+    // Transfers
+    //
+    // There is no GPU, so a transfer is a memcpy and the point it completes at is the one it was
+    // submitted at. What is still modelled honestly is the staging budget and the ordering
+    // vocabulary, because those are what a caller writes code against.
+    // -------------------------------------------------------------------------
+
+    resource_id begin_transfer_batch(resource_id device)
+    {
+        if (!find(g_devices, device))
+            return 0;
+
+        transfer_batch_state s;
+        s.owner = device;
+
+        const resource_id id = allocate_id();
+        g_transfer_batches.emplace(id, s);
+        return id;
+    }
+
+    void discard_transfer_batch(resource_id id) noexcept
+    {
+        transfer_batch_state *batch = find(g_transfer_batches, id);
+        if (!batch)
+            return;
+        if (device_state *dev = find(g_devices, batch->owner))
+            dev->staging_in_use -= std::min(dev->staging_in_use, batch->staged);
+        g_transfer_batches.erase(id);
+    }
+
+    std::size_t transfer_batch_staged_bytes(resource_id id) noexcept
+    {
+        const transfer_batch_state *batch = find(g_transfer_batches, id);
+        return batch ? static_cast<std::size_t>(batch->staged) : 0;
+    }
+
+    std::size_t transfer_batch_size(resource_id id) noexcept
+    {
+        const transfer_batch_state *batch = find(g_transfer_batches, id);
+        return batch ? batch->count : 0;
+    }
+
+    namespace
+    {
+        /** Charges `bytes` against the device's staging budget, or reports it exhausted. */
+        std::expected<void, error> take_staging(device_state &dev, transfer_batch_state &batch, std::size_t bytes)
+        {
+            if (dev.staging_in_use + bytes > dev.staging_capacity)
+                return std::unexpected(make_error(error_code::staging_exhausted, "transfer_batch::upload"));
+            dev.staging_in_use += bytes;
+            batch.staged += bytes;
+            return {};
+        }
+    } // namespace
+
+    std::expected<void, error> transfer_upload_buffer(resource_id id, resource_id dst, std::size_t offset,
+                                                      std::span<const std::byte> data)
+    {
+        transfer_batch_state *batch = find(g_transfer_batches, id);
+        if (!batch)
+            return std::unexpected(make_error(error_code::invalid_argument, "transfer_batch::upload"));
+
+        device_state *dev = find(g_devices, batch->owner);
+        buffer_state *b = find(g_buffers, dst);
+        if (!dev || !b || b->owner != batch->owner)
+            return std::unexpected(make_error(error_code::invalid_argument, "transfer_batch::upload"));
+        if (!range_in_bounds(b->data.size(), offset, data.size()))
+            return std::unexpected(make_error(error_code::invalid_argument, "transfer_batch::upload"));
+        if (b->desc.access == memory_access::gpu_to_cpu)
+            return std::unexpected(make_error(error_code::invalid_argument, "transfer_batch::upload"));
+
+        if (auto ok = take_staging(*dev, *batch, data.size()); !ok)
+            return ok;
+
+        std::memcpy(b->data.data() + offset, data.data(), data.size());
+        ++batch->count;
+        return {};
+    }
+
+    std::expected<void, error> transfer_upload_texture(resource_id id, resource_id dst,
+                                                       std::span<const std::byte> data)
+    {
+        transfer_batch_state *batch = find(g_transfer_batches, id);
+        if (!batch)
+            return std::unexpected(make_error(error_code::invalid_argument, "transfer_batch::upload"));
+
+        device_state *dev = find(g_devices, batch->owner);
+        const texture_state *t = find(g_textures, dst);
+        if (!dev || !t || t->owner != batch->owner || t->swapchain != 0)
+            return std::unexpected(make_error(error_code::invalid_argument, "transfer_batch::upload"));
+        if (data.size() != texture_mip0_bytes(t->desc))
+            return std::unexpected(make_error(error_code::invalid_argument, "transfer_batch::upload"));
+
+        // Texture contents are not kept - there is nothing that could read them back - so the size
+        // check above is the whole of what this can honestly verify.
+        if (auto ok = take_staging(*dev, *batch, data.size()); !ok)
+            return ok;
+        ++batch->count;
+        return {};
+    }
+
+    std::expected<std::uint64_t, error> submit_transfer_batch(resource_id id)
+    {
+        transfer_batch_state *batch = find(g_transfer_batches, id);
+        if (!batch)
+            return std::unexpected(make_error(error_code::invalid_argument, "transfer_batch::submit"));
+
+        device_state *dev = find(g_devices, batch->owner);
+        if (!dev)
+            return std::unexpected(make_error(error_code::invalid_argument, "transfer_batch::submit"));
+
+        // An empty batch reports the "no work" value, exactly as a real backend does when every
+        // upload went straight into mapped memory.
+        const bool empty = batch->count == 0;
+
+        dev->staging_in_use -= std::min(dev->staging_in_use, batch->staged);
+        batch->staged = 0;
+        batch->count = 0;
+        if (empty)
+            return 0ull;
+
+        return ++dev->timelines[static_cast<std::size_t>(queue_kind::copy)];
+    }
+
+    std::expected<resource_id, error> begin_download(resource_id device, resource_id src, std::size_t offset,
+                                                     std::size_t size, std::span<const timeline_point> /*after*/,
+                                                     std::uint64_t &out_value)
+    {
+        device_state *dev = find(g_devices, device);
+        const buffer_state *b = find(g_buffers, src);
+        if (!dev || !b || b->owner != device)
+            return std::unexpected(make_error(error_code::invalid_argument, "download"));
+        if (!range_in_bounds(b->data.size(), offset, size))
+            return std::unexpected(make_error(error_code::invalid_argument, "download"));
+        if (!has_flag(b->desc.usage, buffer_usage::transfer_src))
+            return std::unexpected(make_error(error_code::invalid_argument, "download"));
+
+        download_state d;
+        d.owner = device;
+        d.data.assign(b->data.begin() + static_cast<std::ptrdiff_t>(offset),
+                      b->data.begin() + static_cast<std::ptrdiff_t>(offset + size));
+
+        out_value = ++dev->timelines[static_cast<std::size_t>(queue_kind::copy)];
+
+        const resource_id id = allocate_id();
+        g_downloads.emplace(id, std::move(d));
+        return id;
+    }
+
+    std::expected<std::span<const std::byte>, error> download_bytes(resource_id id)
+    {
+        const download_state *d = find(g_downloads, id);
+        if (!d)
+            return std::unexpected(make_error(error_code::invalid_argument, "readback::bytes"));
+        return std::span<const std::byte>{d->data};
+    }
+
+    void destroy_download(resource_id id) noexcept
+    {
+        g_downloads.erase(id);
     }
 
 } // namespace catalyst::rendering::detail

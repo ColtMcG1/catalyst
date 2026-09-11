@@ -37,29 +37,8 @@ namespace catalyst::rendering::detail::vulkan
 
     namespace
     {
-        std::size_t mip0_bytes(const texture_desc &desc) noexcept
-        {
-            return static_cast<std::size_t>(desc.extent.width) * desc.extent.height * desc.extent.depth *
-                   format_size_bytes(desc.pixel_format);
-        }
-
-        VkExtent3D image_extent(const texture_desc &desc) noexcept
-        {
-            VkExtent3D e{desc.extent.width, desc.extent.height, desc.extent.depth};
-            if (desc.dimension == texture_dimension::texture_1d)
-                e.height = 1;
-            if (desc.dimension != texture_dimension::texture_3d)
-                e.depth = 1;
-            e.width = std::max(e.width, 1u);
-            e.height = std::max(e.height, 1u);
-            e.depth = std::max(e.depth, 1u);
-            return e;
-        }
-
-        std::uint32_t layer_count(const texture_desc &desc) noexcept
-        {
-            return desc.dimension == texture_dimension::texture_3d ? 1u : std::max(desc.array_layers, 1u);
-        }
+        // mip0_bytes / image_extent / layer_count now live in vulkan_backend.hpp, because
+        // vulkan_transfer.cpp needs them too.
 
         VkImageSubresourceRange full_range(const texture_state &t) noexcept
         {
@@ -83,7 +62,7 @@ namespace catalyst::rendering::detail::vulkan
             VkResult result = vkCreateImageView(dev.device, &info, nullptr, &t.view);
             if (result != VK_SUCCESS)
             {
-                report("vkCreateImageView failed (%s)", result_string(result));
+                logging::error<detail::render_log>("vkCreateImageView failed ({})", result_string(result));
                 return false;
             }
 
@@ -94,7 +73,8 @@ namespace catalyst::rendering::detail::vulkan
                 result = vkCreateImageView(dev.device, &info, nullptr, &t.sampled_view);
                 if (result != VK_SUCCESS)
                 {
-                    report("vkCreateImageView (depth aspect) failed (%s)", result_string(result));
+                    logging::error<detail::render_log>("vkCreateImageView (depth aspect) failed ({})",
+                                                       result_string(result));
                     return false;
                 }
             }
@@ -131,6 +111,7 @@ namespace catalyst::rendering::detail::vulkan
         t.swapchain = swapchain_id;
         t.vk_format = to_vk_format(t.desc.pixel_format);
         t.aspect = aspect_mask(t.desc.pixel_format);
+        t.created = marks_now(*dev);
 
         if (!initial_data.empty() && initial_data.size() != mip0_bytes(t.desc))
             return 0;
@@ -144,7 +125,7 @@ namespace catalyst::rendering::detail::vulkan
         info.samples = to_vk_sample_count(t.desc.sample_count);
         info.tiling = VK_IMAGE_TILING_OPTIMAL;
         info.usage = to_vk_image_usage(t.desc.usage);
-        info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        apply_sharing(*dev, info);
         info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
         VkImageFormatProperties supported{};
@@ -152,20 +133,22 @@ namespace catalyst::rendering::detail::vulkan
                                                                    info.tiling, info.usage, info.flags, &supported);
         if (result != VK_SUCCESS)
         {
-            report("create_texture: format %u is not supported with the requested usage (%s)",
-                   static_cast<unsigned>(t.desc.pixel_format), result_string(result));
+            logging::error<detail::render_log>(
+                "create_texture: format {} is not supported with the requested usage ({})",
+                static_cast<unsigned>(t.desc.pixel_format), result_string(result));
             return 0;
         }
         if ((supported.sampleCounts & info.samples) == 0)
         {
-            report("create_texture: sample count %u is not supported for this format", t.desc.sample_count);
+            logging::error<detail::render_log>("create_texture: sample count {} is not supported for this format",
+                                               t.desc.sample_count);
             return 0;
         }
 
         result = vkCreateImage(dev->device, &info, nullptr, &t.image);
         if (result != VK_SUCCESS)
         {
-            report("create_texture: vkCreateImage failed (%s)", result_string(result));
+            logging::error<detail::render_log>("create_texture: vkCreateImage failed ({})", result_string(result));
             return 0;
         }
 
@@ -175,44 +158,46 @@ namespace catalyst::rendering::detail::vulkan
             return 0;
         }
 
-        // Move to GENERAL (the layout user textures live in) and upload mip 0 / layer 0 if requested.
-        VkBuffer staging_source = VK_NULL_HANDLE;
-        bool ok = false;
-        if (VkCommandBuffer cmd = begin_immediate(*dev))
-        {
-            VkImageMemoryBarrier to_general{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-            to_general.srcAccessMask = 0;
-            to_general.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-            to_general.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            to_general.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-            to_general.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            to_general.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            to_general.image = t.image;
-            to_general.subresourceRange = full_range(t);
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
-                                 nullptr, 0, nullptr, 1, &to_general);
+        // Move to GENERAL (the layout user textures live in) and upload mip 0 / layer 0 if
+        // requested - both on the copy queue, in one submission that nothing waits for. The image
+        // was created moments ago, so no other queue can be reading it and the transfer overlaps
+        // whatever the frame is doing.
+        //
+        // The layout transition being on the copy queue is what `VK_SHARING_MODE_CONCURRENT` buys:
+        // an exclusive image would need an ownership release here and an acquire on the graphics
+        // queue, which nothing in this backend tracks.
+        const auto uploaded = transfer_once(
+            *dev, device_id, initial_data, t.created,
+            [&](VkCommandBuffer cmd, VkBuffer source, VkDeviceSize source_offset) {
+                VkImageMemoryBarrier to_general{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+                to_general.srcAccessMask = 0;
+                to_general.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+                to_general.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                to_general.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+                to_general.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                to_general.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                to_general.image = t.image;
+                to_general.subresourceRange = full_range(t);
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
+                                     nullptr, 0, nullptr, 1, &to_general);
 
-            ok = true;
-            if (!initial_data.empty())
-            {
-                ok = stage_upload(*dev, initial_data, staging_source);
-                if (ok)
-                {
-                    VkBufferImageCopy region{};
-                    region.imageSubresource.aspectMask =
-                        (t.aspect & VK_IMAGE_ASPECT_COLOR_BIT) ? VK_IMAGE_ASPECT_COLOR_BIT : VK_IMAGE_ASPECT_DEPTH_BIT;
-                    region.imageSubresource.mipLevel = 0;
-                    region.imageSubresource.baseArrayLayer = 0;
-                    region.imageSubresource.layerCount = 1;
-                    region.imageExtent = info.extent;
-                    vkCmdCopyBufferToImage(cmd, staging_source, t.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-                }
-            }
-            ok = end_immediate(*dev) && ok;
-        }
+                if (initial_data.empty())
+                    return;
 
-        if (!ok)
+                VkBufferImageCopy region{};
+                region.bufferOffset = source_offset;
+                region.imageSubresource.aspectMask =
+                    (t.aspect & VK_IMAGE_ASPECT_COLOR_BIT) ? VK_IMAGE_ASPECT_COLOR_BIT : VK_IMAGE_ASPECT_DEPTH_BIT;
+                region.imageSubresource.mipLevel = 0;
+                region.imageSubresource.baseArrayLayer = 0;
+                region.imageSubresource.layerCount = 1;
+                region.imageExtent = info.extent;
+                vkCmdCopyBufferToImage(cmd, source, t.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
+            });
+
+        if (!uploaded)
         {
+            logging::error<detail::render_log>("create_texture: initial upload failed: {}", uploaded.error());
             release_texture_objects(*dev, t);
             return 0;
         }
@@ -343,7 +328,7 @@ namespace catalyst::rendering::detail
         const VkResult result = vkCreateSampler(dev->device, &info, nullptr, &s.sampler);
         if (result != VK_SUCCESS)
         {
-            report("create_sampler: vkCreateSampler failed (%s)", result_string(result));
+            logging::error<detail::render_log>("create_sampler: vkCreateSampler failed ({})", result_string(result));
             return 0;
         }
         if (desc.debug_name)

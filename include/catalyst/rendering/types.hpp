@@ -142,6 +142,63 @@ namespace catalyst::rendering
     }
 
     // -----------------------------------------------------------------------------
+    // Queues
+    // -----------------------------------------------------------------------------
+
+    /**
+     * @enum queue_kind
+     * @brief Which hardware queue work runs on.
+     * @details Named here rather than in queue.hpp because both `timeline_point` and `queue` carry
+     * one and neither header can include the other.
+     *
+     * A device exposes all three whatever the adapter has; `queue_info::dedicated` says whether the
+     * one you asked for is real hardware or the graphics queue under another name. That is the
+     * honest version of what `queue_type` used to be, which restricted what a command list could
+     * record while every queue ran on the same `VkQueue` regardless.
+     */
+    enum class queue_kind : std::uint8_t
+    {
+        /** @brief Accepts everything: draws, dispatches and copies. Always dedicated. */
+        graphics,
+        /** @brief Dispatches and copies. Dedicated on adapters with an async-compute engine. */
+        compute,
+        /** @brief Copies only. Dedicated on adapters with a DMA engine, which is most of them. */
+        copy,
+    };
+
+    /** @brief Number of values in @ref queue_kind. */
+    inline constexpr std::size_t queue_kind_count = 3;
+
+    /** @brief A short, stable name for a queue kind ("graphics", "compute", "copy"). */
+    [[nodiscard]] constexpr const char *to_string(queue_kind kind) noexcept
+    {
+        switch (kind)
+        {
+        case queue_kind::graphics: return "graphics";
+        case queue_kind::compute:  return "compute";
+        case queue_kind::copy:     return "copy";
+        }
+        return "unknown";
+    }
+
+    /**
+     * @brief True when a list recorded for `kind` may contain commands needing `required`.
+     * @details The capability lattice: graphics can do everything, compute can dispatch and copy,
+     * copy can only copy. Used at *record* time - a `copy` list refuses `dispatch`, a `compute` list
+     * refuses `draw`.
+     *
+     * It deliberately says nothing about submission. A list may only be submitted to a queue of its
+     * own kind, because a command buffer belongs to the queue family its pool was created from and
+     * no other; see queue.hpp. The fallback for an adapter with no dedicated engine happens a level
+     * below that, where the copy *queue* is the graphics queue under another name, so the list was
+     * allocated from the right family all along.
+     */
+    [[nodiscard]] constexpr bool queue_accepts(queue_kind kind, queue_kind required) noexcept
+    {
+        return static_cast<std::uint8_t>(kind) <= static_cast<std::uint8_t>(required);
+    }
+
+    // -----------------------------------------------------------------------------
     // Formats
     // -----------------------------------------------------------------------------
 

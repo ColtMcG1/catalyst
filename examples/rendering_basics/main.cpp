@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdint>
 #include <span>
+#include <vector>
 #include <thread>
 
 namespace logging = catalyst::logging;
@@ -152,13 +153,46 @@ int main()
     logging::info<example_log>("Vertex buffer: {} vertices, {} bytes", vb.count(), vb.size_bytes());
 
     rendering::pipeline pipeline = make_triangle_pipeline(dev, sd.pixel_format);
-    rendering::command_list cl = rendering::create_command_list(dev, {.debug_name = "frame"});
+
+    // Three frames in flight, one command pool per frame. `frames.begin()` is the only call in the
+    // loop below that blocks, and it blocks for the frame three frames back - which is what lets
+    // the CPU record frame N+1 while the GPU is still drawing frame N. Before Tier 3 this example
+    // had one command list and paid the same wait invisibly, inside `begin_recording`.
+    auto frames = rendering::frame_ring::create(dev, {.frames_in_flight = 3, .debug_name = "example"});
+    if (!frames)
+    {
+        logging::critical<example_log>("Failed to create the frame ring: {}", frames.error());
+        return 1;
+    }
+
+    // One list per frame slot, allocated once and re-recorded after each `reset_command_pool` that
+    // `frames.begin()` performs.
+    std::vector<rendering::command_list> lists;
+
+    // The queue everything in this example runs on, plus a line reporting what the adapter actually
+    // gave us - `dedicated` is false when a kind is the graphics queue answering to another name.
+    const rendering::queue graphics = rendering::get_queue(dev);
+    const rendering::queue_info copy_info = rendering::get_queue_info(rendering::get_queue(dev, rendering::queue_kind::copy));
+    logging::info<example_log>("Copy queue: family {} ({})", copy_info.family_index,
+                               copy_info.dedicated ? "dedicated engine" : "aliased onto graphics");
 
     constexpr int frame_count = 120;
     int rendered = 0;
     for (int frame = 0; frame < frame_count; ++frame)
     {
         platform::pump_events();
+
+        auto f = frames->begin();
+        if (!f)
+        {
+            logging::error<example_log>("frame_ring: {}", f.error());
+            break;
+        }
+
+        // One list per slot, created the first time each slot comes round.
+        while (lists.size() <= f->slot())
+            lists.push_back(rendering::create_command_list(f->pool(), "frame"));
+        const rendering::command_list cl = lists[f->slot()];
 
         rendering::texture back_buffer = rendering::acquire_next_image(sc);
         if (!back_buffer)
@@ -167,6 +201,7 @@ int main()
             const rendering::extent2d extent = client_extent();
             if (extent.width != 0 && extent.height != 0 && rendering::resize_swapchain(sc, extent))
                 sd = rendering::get_swapchain_desc(sc);
+            f->end(); // Nothing was submitted, so this slot is free again immediately.
             std::this_thread::sleep_for(std::chrono::milliseconds(16));
             continue;
         }
@@ -195,15 +230,35 @@ int main()
         rendering::end_render_pass(cl);
         rendering::end_recording(cl);
 
-        rendering::submit(dev, cl);
+        const auto done = rendering::submit(graphics, cl);
+        if (!done)
+        {
+            logging::error<example_log>("submit failed: {}", done.error());
+            f->end();
+            if (rendering::is_fatal(done.error().code))
+                break;
+            continue;
+        }
+
         rendering::present(sc);
         ++rendered;
+
+        // This slot's pool is recyclable once `done` completes, which is what `begin()` will wait
+        // for when the slot comes round again three frames from now.
+        f->end(*done);
+
+        // Resume anything waiting on a `timeline_point`, and retire what the GPU has finished with.
+        // Nothing in this example awaits one, but a frame loop should pump regardless: it is where
+        // resources destroyed mid-frame actually get released.
+        rendering::pump(dev);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 
     rendering::wait_idle(dev);
-    rendering::destroy_command_list(cl);
+    for (rendering::command_list &list : lists)
+        rendering::destroy_command_list(list);
+    *frames = rendering::frame_ring{}; // Destroys the pools; must happen before the device does.
     rendering::destroy_pipeline(pipeline);
     vb.destroy();
     rendering::destroy_swapchain(sc);

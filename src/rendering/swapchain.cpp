@@ -9,6 +9,7 @@
 #include <catalyst/rendering/swapchain.hpp>
 
 #include "detail_backend.hpp"
+#include "detail_sync.hpp"
 
 namespace catalyst::rendering
 {
@@ -19,6 +20,7 @@ namespace catalyst::rendering
             return {};
         if (desc.pixel_format == format::unknown || is_depth_format(desc.pixel_format))
             return {};
+        const detail::exclusive_guard guard;
         return swapchain{detail::create_swapchain(dev.id(), desc)};
     }
 
@@ -26,19 +28,26 @@ namespace catalyst::rendering
     {
         if (!sc)
             return;
-        detail::destroy_swapchain(sc.id());
+        {
+            const detail::exclusive_guard guard;
+            detail::destroy_swapchain(sc.id());
+        }
         sc = swapchain{};
     }
 
     bool is_valid(const swapchain &sc) noexcept
     {
-        return sc && detail::is_swapchain_valid(sc.id());
+        if (!sc)
+            return false;
+        const detail::shared_guard guard;
+        return detail::is_swapchain_valid(sc.id());
     }
 
     swapchain_desc get_swapchain_desc(const swapchain &sc) noexcept
     {
         if (!sc)
             return {};
+        const detail::shared_guard guard;
         return detail::get_swapchain_desc(sc.id());
     }
 
@@ -46,6 +55,7 @@ namespace catalyst::rendering
     {
         if (!sc || extent.width == 0 || extent.height == 0)
             return false;
+        const detail::exclusive_guard guard;
         return detail::resize_swapchain(sc.id(), extent);
     }
 
@@ -53,6 +63,7 @@ namespace catalyst::rendering
     {
         if (!sc)
             return {};
+        const detail::exclusive_guard guard;
         return texture{detail::acquire_next_image(sc.id())};
     }
 
@@ -60,6 +71,7 @@ namespace catalyst::rendering
     {
         if (!sc)
             return false;
+        const detail::exclusive_guard guard;
         return detail::present(sc.id());
     }
 

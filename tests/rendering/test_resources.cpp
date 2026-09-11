@@ -476,11 +476,12 @@ namespace
         pipeline p = create_graphics_pipeline(dev, gp);
         CT_REQUIRE(is_valid(p));
 
+        const queue graphics = get_queue(dev);
         command_list cl = create_command_list(dev);
         CT_REQUIRE(is_valid(cl));
         CT_REQUIRE(!is_recording(cl));
         CT_REQUIRE(!end_recording(cl));
-        CT_REQUIRE(!submit(dev, cl)); // Never recorded.
+        CT_REQUIRE(!submit(graphics, cl)); // Never recorded.
 
         CT_REQUIRE(begin_recording(cl));
         CT_REQUIRE(is_recording(cl));
@@ -501,18 +502,28 @@ namespace
         CT_REQUIRE(end_recording(cl));
         CT_REQUIRE(!is_recording(cl));
 
-        CT_REQUIRE(submit(dev, cl));
-        CT_REQUIRE(submit(dev, cl)); // Re-submittable until re-recorded.
+        const auto first = submit(graphics, cl);
+        CT_REQUIRE(first);
+        const auto second = submit(graphics, cl); // Re-submittable until re-recorded.
+        CT_REQUIRE(second);
+
+        // Points from one queue are ordered, and a later submission is strictly later.
+        CT_REQUIRE(same_timeline(*first, *second));
+        CT_REQUIRE(*first < *second);
+        CT_REQUIRE(latest(*first, *second) == *second);
+        CT_REQUIRE(first->queue() == queue_kind::graphics);
+        CT_REQUIRE(*second <= last_submitted(graphics));
+
         CT_REQUIRE(present(sc));
 
         // Multi-list submission rejects any invalid or unfinished list.
         command_list other = create_command_list(dev);
         const std::array<command_list, 2> both = {cl, other};
-        CT_REQUIRE(!submit(dev, both));
+        CT_REQUIRE(!submit(graphics, {.lists = both}));
         CT_REQUIRE(begin_recording(other));
-        CT_REQUIRE(!submit(dev, both)); // `other` still recording.
+        CT_REQUIRE(!submit(graphics, {.lists = both})); // `other` still recording.
         CT_REQUIRE(end_recording(other));
-        CT_REQUIRE(submit(dev, both));
+        CT_REQUIRE(submit(graphics, {.lists = both}));
 
         // Commands recorded outside begin/end are ignored, not fatal.
         draw(cl, 3);
@@ -539,14 +550,14 @@ namespace
         std::array<std::uint32_t, 2> out{};
         CT_REQUIRE(read_buffer(dst, 0, std::as_writable_bytes(std::span{out})));
         CT_REQUIRE(out[0] == 0 && out[1] == 0); // Not copied until submitted.
-        CT_REQUIRE(submit(dev, cl));
+        CT_REQUIRE(submit(graphics, cl));
         CT_REQUIRE(read_buffer(dst, 0, std::as_writable_bytes(std::span{out})));
         CT_REQUIRE(out[0] == 30 && out[1] == 40);
 
         destroy_command_list(other);
         destroy_command_list(cl);
         CT_REQUIRE(!cl);
-        CT_REQUIRE(!submit(dev, cl));
+        CT_REQUIRE(!submit(graphics, cl));
 
         destroy_buffer(src);
         destroy_buffer(dst);
@@ -582,7 +593,7 @@ namespace
         pipeline p = create_compute_pipeline(dev, {cs, "fill"});
         CT_REQUIRE(is_valid(p));
 
-        command_list cl = create_command_list(dev, {queue_type::compute, "fill"});
+        command_list cl = create_command_list(dev, {queue_kind::compute, "fill"});
         CT_REQUIRE(begin_recording(cl));
         set_pipeline(cl, p);
         set_storage_buffer(cl, 0, storage.handle());
@@ -590,7 +601,7 @@ namespace
         dispatch(cl, element_count / 64);
         copy_buffer(cl, storage.handle(), 0, readback.handle(), 0, storage.size_bytes());
         CT_REQUIRE(end_recording(cl));
-        CT_REQUIRE(submit(dev, cl));
+        CT_REQUIRE(submit(get_queue(dev, queue_kind::compute), cl));
 
         std::array<std::uint32_t, element_count> out{};
         CT_REQUIRE(readback.read(out));
@@ -607,9 +618,15 @@ namespace
         dispatch(cl, element_count / 64);
         copy_buffer(cl, storage.handle(), 0, readback.handle(), 0, storage.size_bytes());
         CT_REQUIRE(end_recording(cl));
-        CT_REQUIRE(submit(dev, cl));
+        CT_REQUIRE(submit(get_queue(dev, queue_kind::compute), cl));
         CT_REQUIRE(readback.read(out));
         CT_REQUIRE(out[1] == other && out[255] == 255 * other);
+
+        // A compute list belongs to the compute queue and is refused by every other, because its
+        // command buffer came from the compute family's pool. The old `queue_type` made no such
+        // check, since every kind was submitted to the same queue regardless.
+        CT_REQUIRE(!submit(get_queue(dev, queue_kind::copy), cl));
+        CT_REQUIRE(!submit(get_queue(dev, queue_kind::graphics), cl));
 
         destroy_command_list(cl);
         destroy_pipeline(p);

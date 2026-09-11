@@ -52,8 +52,8 @@ namespace catalyst::rendering::detail::vulkan
             const VkResult result = vkAllocateMemory(dev.device, &info, nullptr, &out_memory);
             if (result != VK_SUCCESS)
             {
-                report("vkAllocateMemory(%llu bytes, type %u) failed (%s)",
-                       static_cast<unsigned long long>(req.size), index, result_string(result));
+                logging::error<detail::render_log>("vkAllocateMemory({} bytes, type {}) failed ({})",
+                                                   req.size, index, result_string(result));
                 return false;
             }
             out_flags = dev.memory_properties.memoryTypes[index].propertyFlags;
@@ -103,7 +103,7 @@ namespace catalyst::rendering::detail::vulkan
         VkResult result = vkBindBufferMemory(dev.device, buffer, memory, 0);
         if (result != VK_SUCCESS)
         {
-            report("vkBindBufferMemory failed (%s)", result_string(result));
+            logging::error<detail::render_log>("vkBindBufferMemory failed ({})", result_string(result));
             vkFreeMemory(dev.device, memory, nullptr);
             return false;
         }
@@ -117,7 +117,7 @@ namespace catalyst::rendering::detail::vulkan
             result = vkMapMemory(dev.device, memory, 0, VK_WHOLE_SIZE, 0, &out_mapped);
             if (result != VK_SUCCESS)
             {
-                report("vkMapMemory failed (%s)", result_string(result));
+                logging::error<detail::render_log>("vkMapMemory failed ({})", result_string(result));
                 vkFreeMemory(dev.device, memory, nullptr);
                 return false;
             }
@@ -142,7 +142,7 @@ namespace catalyst::rendering::detail::vulkan
         const VkResult result = vkBindImageMemory(dev.device, image, memory, 0);
         if (result != VK_SUCCESS)
         {
-            report("vkBindImageMemory failed (%s)", result_string(result));
+            logging::error<detail::render_log>("vkBindImageMemory failed ({})", result_string(result));
             vkFreeMemory(dev.device, memory, nullptr);
             return false;
         }
@@ -202,7 +202,7 @@ namespace catalyst::rendering::detail::vulkan
             const VkResult result = vkCreateBuffer(dev.device, &info, nullptr, &staging.buffer);
             if (result != VK_SUCCESS)
             {
-                report("staging: vkCreateBuffer failed (%s)", result_string(result));
+                logging::error<detail::render_log>("staging: vkCreateBuffer failed ({})", result_string(result));
                 return false;
             }
 

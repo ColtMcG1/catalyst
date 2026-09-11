@@ -103,12 +103,22 @@ namespace catalyst::rendering
     /**
      * @brief Copies `data` into the buffer at `offset`. Allowed for `gpu_only` and `cpu_to_gpu` buffers.
      * @return False if the range is out of bounds, the handle is invalid or the buffer is `gpu_to_cpu`.
+     * @details **Does not block.** A `gpu_only` buffer that is not host-visible is written through
+     * the staging ring and a copy submitted on the copy queue, and later submissions wait for that
+     * copy on the GPU - so a draw that reads the buffer sees the new bytes without the caller
+     * ordering anything. It used to submit and then wait on a fence, which drained the queue.
+     * `transfer_batch` in transfer.hpp is the form that reports *when*, and the one to use for more
+     * than a couple of writes: it submits once for the whole batch.
      */
     bool write_buffer(const buffer &b, std::size_t offset, std::span<const std::byte> data);
 
     /**
      * @brief Copies `out.size()` bytes from the buffer at `offset` into `out`. Only allowed for `gpu_to_cpu` buffers.
      * @return False if the range is out of bounds, the handle is invalid or the buffer is not readable.
+     * @details **Blocks the calling thread** until every queue has finished what it was given, because
+     * it hands back bytes and so has nowhere else to put the waiting. `download` in transfer.hpp is
+     * the non-blocking form: it returns a `readback` that can be polled, waited on or `co_await`ed,
+     * and it can be ordered against one `timeline_point` rather than against everything.
      */
     bool read_buffer(const buffer &b, std::size_t offset, std::span<std::byte> out);
 

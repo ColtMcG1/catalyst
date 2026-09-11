@@ -34,6 +34,8 @@ namespace catalyst::bench::render
     {
         /** Render into an off-screen image ring instead of a window; no presentation engine is involved. */
         bool offscreen = false;
+        /** Frames the ring keeps in flight; 1 reproduces the fully serialised loop the module had before Tier 3. */
+        std::uint32_t frames_in_flight = 3;
         /** Wait for the GPU after every frame, so per-frame samples are GPU time rather than queue-submit time. */
         bool serialize = false;
         /** Turn on the backend's validation layers. Costs a lot of performance; off by default. */
@@ -303,9 +305,10 @@ namespace catalyst::bench::render
      * burst of OS messages would otherwise show up as a slow frame.
      *
      * The phases matter because only one of them is CPU work. `acquire` is the presentation engine handing over a back
-     * buffer, `sync` is `begin_recording` waiting for this command list's *previous* submission to finish - with a
-     * single list in flight that is where a GPU-bound frame spends its time - `record` is the commands themselves, and
-     * `submit` is `submit` plus `present` (plus `wait_idle` under `--serialize`).
+     * buffer, `sync` is `frame_ring::begin` waiting for the frame `frames_in_flight` frames back - with a GPU-bound
+     * scene that is where the frame spends its time, and it is the same wait `begin_recording` used to perform
+     * invisibly with a single list - `record` is the commands themselves, and `submit` is `submit` plus `present`
+     * (plus a wait on the frame's own point under `--serialize`).
      */
     struct frame_report
     {
@@ -342,9 +345,14 @@ namespace catalyst::bench::render
 
         frame_report report;
 
-        rendering::command_list cl = rendering::create_command_list(ctx.device(), {.debug_name = "benchmark frame"});
-        if (!cl)
+        // One pool per frame in flight, and one list per pool. `frames.begin()` performs the wait
+        // that `begin_recording` used to hide, which is why `sync` is measured around it.
+        auto frames = rendering::frame_ring::create(
+            ctx.device(), {.frames_in_flight = opt.frames_in_flight, .debug_name = "benchmark"});
+        if (!frames)
             return report;
+
+        std::vector<rendering::command_list> lists;
 
         std::vector<double> acquire_samples;
         std::vector<double> sync_samples;
@@ -360,18 +368,26 @@ namespace catalyst::bench::render
             if (!back_buffer)
                 return false;
 
-            // begin_recording blocks until this list's previous submission has completed, so it is the frame's sync
-            // point and is timed apart from the commands themselves.
+            // The frame's sync point, named and timed: it waits for the frame `frames_in_flight`
+            // frames back and recycles its pool.
+            auto f = frames->begin();
+            if (!f)
+                return false;
+            while (lists.size() <= f->slot())
+                lists.push_back(rendering::create_command_list(f->pool(), "benchmark frame"));
+            const rendering::command_list cl = lists[f->slot()];
+
             rendering::begin_recording(cl);
             const auto record_start = clock::now();
             record(cl, back_buffer);
             rendering::end_recording(cl);
             const auto record_end = clock::now();
 
-            rendering::submit(ctx.device(), cl);
+            const auto done = rendering::submit(rendering::get_queue(ctx.device()), cl);
             ctx.present();
-            if (opt.serialize)
-                rendering::wait_idle(ctx.device());
+            f->end(done ? *done : rendering::timeline_point{});
+            if (opt.serialize && done)
+                (void)done->wait(); // The frame's own point, rather than every queue on the device.
             const auto submitted = clock::now();
 
             if (measured)
@@ -431,7 +447,9 @@ namespace catalyst::bench::render
         rendering::wait_idle(ctx.device());
         report.wall_ms = ms(clock::now() - wall_start).count() - overhead_ms;
 
-        rendering::destroy_command_list(cl);
+        for (rendering::command_list &list : lists)
+            rendering::destroy_command_list(list);
+        *frames = rendering::frame_ring{};
 
         report.frames = frame_samples.size();
         report.acquire = summarize(acquire_samples);

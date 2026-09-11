@@ -73,6 +73,7 @@ namespace catalyst::bench::render
                          "  --vsync                 cap presentation to the display refresh rate\n"
                          "  --width N --height N    render target size (default 1280x720)\n"
                          "  --images N              swapchain image count (default 3)\n"
+                         "  --in-flight N           frames the ring keeps in flight (default 3; 1 fully serialises)\n"
                          "  --frames N              measured frames per frame benchmark (default 240)\n"
                          "  --warmup N              unmeasured frames before each one (default 32)\n"
                          "  --quads a,b,c           quad counts to sweep (default 1,1000,10000,100000)\n"
@@ -128,6 +129,7 @@ namespace catalyst::bench::render
                 out.vsync = true;
             else if (arg == "--width" || arg == "--height" || arg == "--images" || arg == "--frames" ||
                      arg == "--warmup" || arg == "--max-draw-calls" || arg == "--pipeline-iterations" ||
+                     arg == "--in-flight" ||
                      arg == "--resource-iterations")
             {
                 const std::string_view text = value_of(i, arg);
@@ -144,6 +146,8 @@ namespace catalyst::bench::render
                     out.image_count = static_cast<std::uint32_t>(value);
                 else if (arg == "--frames")
                     out.frames = static_cast<std::uint32_t>(value);
+                else if (arg == "--in-flight")
+                    out.frames_in_flight = static_cast<std::uint32_t>(value);
                 else if (arg == "--warmup")
                     out.warmup_frames = static_cast<std::uint32_t>(value);
                 else if (arg == "--max-draw-calls")

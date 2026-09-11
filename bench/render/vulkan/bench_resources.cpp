@@ -8,7 +8,13 @@
  * @details Creation is measured with `measure_lifecycle`, which times a batch of creations and then their destruction
  * separately, so a destroy that has to wait for the GPU is never charged to the create. The transfer numbers are the
  * ones to watch when a frame stalls: `memory_access::cpu_to_gpu` writes are a plain memcpy into host-visible memory,
- * while `memory_access::gpu_only` writes go through a staging buffer and a copy the backend has to submit and wait for.
+ * while `memory_access::gpu_only` writes go through the staging ring and a copy submitted on the copy queue.
+ *
+ * Since Tier 4 the second of those no longer waits for the GPU, so what these numbers measure is the CPU cost of
+ * staging - the copy itself overlaps whatever else the device is doing. The `(direct)` suffix in a label means the
+ * adapter's device-local memory turned out to be host-visible, as it is on every unified-memory part, and the write
+ * never touched the staging path at all; that is the correct behaviour and it is also why this suite says little
+ * about Tier 4 on such a machine.
  */
 
 #include "render_bench.hpp"
@@ -202,7 +208,7 @@ namespace catalyst::bench::render
                     begin_recording(cl);
                     copy_buffer(cl, src, 0, dst, 0, size);
                     end_recording(cl);
-                    submit(dev, cl);
+                    (void)submit(get_queue(dev), cl);
                     wait_idle(dev);
                 });
                 print_name("copy_buffer 16 MiB on device (submit + wait)");

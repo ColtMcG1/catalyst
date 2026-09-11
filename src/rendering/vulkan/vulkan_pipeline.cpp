@@ -135,7 +135,8 @@ namespace catalyst::rendering::detail
         rasterizer.polygonMode = to_vk_polygon_mode(desc.rasterizer.fill);
         if (rasterizer.polygonMode != VK_POLYGON_MODE_FILL && !dev->features.fill_mode_non_solid)
         {
-            report("create_graphics_pipeline: wireframe fill is not supported by this adapter; using solid");
+            logging::warn<detail::render_log>(
+                "create_graphics_pipeline: wireframe fill is not supported by this adapter; using solid");
             rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         }
         rasterizer.cullMode = to_vk_cull_mode(desc.rasterizer.cull);
@@ -207,7 +208,8 @@ namespace catalyst::rendering::detail
         const VkResult result = vkCreateGraphicsPipelines(dev->device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline);
         if (result != VK_SUCCESS)
         {
-            report("create_graphics_pipeline: vkCreateGraphicsPipelines failed (%s)", result_string(result));
+            logging::error<detail::render_log>("create_graphics_pipeline: vkCreateGraphicsPipelines failed ({})",
+                                               result_string(result));
             return 0;
         }
 
@@ -232,7 +234,8 @@ namespace catalyst::rendering::detail
         const VkResult result = vkCreateComputePipelines(dev->device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline);
         if (result != VK_SUCCESS)
         {
-            report("create_compute_pipeline: vkCreateComputePipelines failed (%s)", result_string(result));
+            logging::error<detail::render_log>("create_compute_pipeline: vkCreateComputePipelines failed ({})",
+                                               result_string(result));
             return 0;
         }
 
