@@ -12,6 +12,7 @@
 #include <catalyst/input/feed.hpp>
 #include <catalyst/input/keyboard.hpp>
 #include <catalyst/input/mouse.hpp>
+#include <catalyst/text/utf8.hpp>
 
 // For basic Windows API functions and types (e.g. HWND, HMONITOR, GetKeyState, etc.). The header also
 // suppresses the min/max macros, which would otherwise break every std::min/std::max spelled out below.
@@ -639,22 +640,24 @@ namespace catalyst::platform::detail
          */
         input::character_code utf32_from_utf16_unit(window_state &ws, wchar_t unit) noexcept
         {
-            const std::uint32_t u = static_cast<std::uint16_t>(unit);
+            namespace utf8 = catalyst::text::utf8;
 
-            if (u >= 0xD800u && u <= 0xDBFFu)
+            const char32_t u = static_cast<std::uint16_t>(unit);
+
+            if (utf8::is_high_surrogate(u))
             {
                 ws.pending_high_surrogate = unit;
                 return 0;
             }
 
-            if (u >= 0xDC00u && u <= 0xDFFFu)
+            if (utf8::is_low_surrogate(u))
             {
                 if (ws.pending_high_surrogate == 0)
                     return 0; // stray low surrogate
 
-                const std::uint32_t hi = static_cast<std::uint16_t>(ws.pending_high_surrogate);
+                const char32_t hi = static_cast<std::uint16_t>(ws.pending_high_surrogate);
                 ws.pending_high_surrogate = 0;
-                return static_cast<input::character_code>(0x10000u + (((hi - 0xD800u) << 10) | (u - 0xDC00u)));
+                return static_cast<input::character_code>(utf8::combine_surrogates(hi, u));
             }
 
             ws.pending_high_surrogate = 0;

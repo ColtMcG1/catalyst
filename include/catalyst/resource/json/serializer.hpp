@@ -6,8 +6,6 @@
 
 #pragma once
 
-#include <charconv>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -77,20 +75,9 @@ namespace catalyst::resource::json
             int indent_;       ///< Spaces per nesting level when pretty-printing.
             bool pretty_;      ///< Whether pretty-printing is enabled.
 
-            void newline_indent(int depth)
-            {
-                if (!pretty_)
-                    return;
-                out_.push_back('\n');
-                out_.append(static_cast<std::size_t>(indent_) * static_cast<std::size_t>(depth), ' ');
-            }
+            void newline_indent(int depth);
 
-            void write_int(std::int64_t i)
-            {
-                char buf[24];
-                auto [ptr, ec] = std::to_chars(buf, buf + sizeof buf, i);
-                out_.append(buf, ptr);
-            }
+            void write_int(std::int64_t i);
 
             /**
              * @brief Append a double, ensuring it reads back as floating-point.
@@ -98,26 +85,7 @@ namespace catalyst::resource::json
              * Non-finite values (inf/nan) are emitted as `null`, matching `JSON.stringify`. A trailing
              * `.0` is added when the shortest form would otherwise look like an integer.
              */
-            void write_double(double d)
-            {
-                if (!std::isfinite(d))
-                {
-                    out_ += "null";
-                    return;
-                }
-                char buf[32];
-                auto [ptr, ec] = std::to_chars(buf, buf + sizeof buf, d);
-                bool floaty = false; // does it already read back as a floating value?
-                for (const char *q = buf; q < ptr; ++q)
-                    if (*q == '.' || *q == 'e' || *q == 'E')
-                    {
-                        floaty = true;
-                        break;
-                    }
-                out_.append(buf, ptr);
-                if (!floaty)
-                    out_ += ".0";
-            }
+            void write_double(double d);
 
             /**
              * @brief Append a JSON string literal, escaping as required.
@@ -126,53 +94,7 @@ namespace catalyst::resource::json
              * bytes, so the same SWAR scanner finds the next one and everything before it is appended
              * in bulk. (Measured: 11% faster dumps on short strings, ~40% on prose-length strings.)
              */
-            void write_string(std::string_view s)
-            {
-                static constexpr char hex[] = "0123456789abcdef";
-                out_.push_back('"');
-                std::size_t i = 0;
-                while (true)
-                {
-                    const std::size_t stop = scan::swar(s, i);
-                    out_.append(s.data() + i, stop - i);
-                    if (stop == s.size())
-                        break;
-                    i = stop + 1;
-                    const char c = s[stop];
-                    switch (c)
-                    {
-                    case '"':
-                        out_ += "\\\"";
-                        break;
-                    case '\\':
-                        out_ += "\\\\";
-                        break;
-                    case '\b':
-                        out_ += "\\b";
-                        break;
-                    case '\f':
-                        out_ += "\\f";
-                        break;
-                    case '\n':
-                        out_ += "\\n";
-                        break;
-                    case '\r':
-                        out_ += "\\r";
-                        break;
-                    case '\t':
-                        out_ += "\\t";
-                        break;
-                    default:
-                    { // other control chars -> \u00XX
-                        const unsigned char uc = static_cast<unsigned char>(c);
-                        out_ += "\\u00";
-                        out_.push_back(hex[(uc >> 4) & 0xF]);
-                        out_.push_back(hex[uc & 0xF]);
-                    }
-                    }
-                }
-                out_.push_back('"');
-            }
+            void write_string(std::string_view s);
 
             template <class Range>
             void write_array(const Range &items, int depth)
@@ -229,12 +151,7 @@ namespace catalyst::resource::json
      * @param v The value to serialize.
      * @param indent Negative for compact output; `>= 0` pretty-prints with that many spaces per level.
      */
-    [[nodiscard]] inline std::string dump(const value &v, int indent = -1)
-    {
-        std::string out;
-        detail::serializer(out, indent).write(v);
-        return out;
-    }
+    [[nodiscard]] std::string dump(const value &v, int indent = -1);
 
     /**
      * @fn dump(const cursor &c, int indent)
@@ -242,12 +159,7 @@ namespace catalyst::resource::json
      * @param c A valid cursor.
      * @param indent Negative for compact output; `>= 0` pretty-prints with that many spaces per level.
      */
-    [[nodiscard]] inline std::string dump(const cursor &c, int indent = -1)
-    {
-        std::string out;
-        detail::serializer(out, indent).write(c);
-        return out;
-    }
+    [[nodiscard]] std::string dump(const cursor &c, int indent = -1);
 
     /**
      * @fn dump(const document &doc, int indent)
@@ -255,11 +167,6 @@ namespace catalyst::resource::json
      * @param doc The document to serialize; an empty document produces an empty string.
      * @param indent Negative for compact output; `>= 0` pretty-prints with that many spaces per level.
      */
-    [[nodiscard]] inline std::string dump(const document &doc, int indent = -1)
-    {
-        if (doc.empty())
-            return {};
-        return dump(doc.root(), indent);
-    }
+    [[nodiscard]] std::string dump(const document &doc, int indent = -1);
 
 } // namespace catalyst::resource::json

@@ -122,14 +122,7 @@ namespace catalyst::resource::json
          * @brief Format the error for display, e.g. `"JSON parse error at offset 12: invalid number"`.
          * @return A freshly allocated string.
          */
-        [[nodiscard]] std::string message() const
-        {
-            std::string what = "JSON parse error at offset ";
-            what += std::to_string(offset);
-            what += ": ";
-            what += to_string(code);
-            return what;
-        }
+        [[nodiscard]] std::string message() const;
 
         [[nodiscard]] friend bool operator==(const parse_error &, const parse_error &) noexcept = default;
     };

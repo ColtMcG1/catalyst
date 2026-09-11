@@ -11,7 +11,6 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "tape.hpp"
@@ -43,12 +42,7 @@ namespace catalyst::resource::json
          * @return The root cursor, or an invalid cursor if the document is empty (only a
          *         default-constructed document is empty; @ref parse_document never yields one).
          */
-        [[nodiscard]] cursor root() const noexcept
-        {
-            if (tape_.empty())
-                return cursor();
-            return cursor(tape_.data(), strings_.data(), 0);
-        }
+        [[nodiscard]] cursor root() const noexcept;
 
         /// @return `true` if the document holds no parsed value.
         [[nodiscard]] bool empty() const noexcept { return tape_.empty(); }
@@ -80,11 +74,7 @@ namespace catalyst::resource::json
              *        (Measured: this alone nearly doubled tape parse throughput on multi-MB inputs;
              *        growing by doubling copies the whole buffer at every step.)
              */
-            explicit tape_sink(std::size_t input_size)
-            {
-                strings_.reserve(input_size);
-                tape_.reserve(input_size / 4 + 8);
-            }
+            explicit tape_sink(std::size_t input_size);
 
             struct root_handle
             {
@@ -97,13 +87,7 @@ namespace catalyst::resource::json
             using object_handle = container_handle;
 
             [[nodiscard]] root_handle root() const noexcept { return {}; }
-            [[nodiscard]] document finish(root_handle &) noexcept
-            {
-                document doc;
-                doc.tape_ = std::move(tape_);
-                doc.strings_ = std::move(strings_);
-                return doc;
-            }
+            [[nodiscard]] document finish(root_handle &) noexcept;
 
             template <class H>
             void on_null(H &)
@@ -161,18 +145,8 @@ namespace catalyst::resource::json
         private:
             void emit(tape::tag t, std::uint64_t payload = 0) { tape_.push_back(tape::make(t, payload)); }
 
-            container_handle open(tape::tag t)
-            {
-                const container_handle h{tape_.size()};
-                emit(t);            // payload (skip index) backpatched on close
-                tape_.push_back(0); // count backpatched on close
-                return h;
-            }
-            void close(tape::tag t, container_handle h, std::uint64_t count)
-            {
-                tape_[h.header] = tape::make(t, tape_.size());
-                tape_[h.header + 1] = count;
-            }
+            container_handle open(tape::tag t);
+            void close(tape::tag t, container_handle h, std::uint64_t count);
 
             std::vector<std::uint64_t> tape_; ///< Emitted tape words.
             std::string strings_;             ///< Emitted string arena.
@@ -189,37 +163,6 @@ namespace catalyst::resource::json
      * a standalone @ref value (allocating as the `value` API normally does).
      * @param c A valid cursor.
      */
-    [[nodiscard]] inline value to_value(const cursor &c)
-    {
-        switch (c.kind())
-        {
-        case type::null:
-            return value(nullptr);
-        case type::boolean:
-            return value(c.as_bool());
-        case type::integer:
-            return value(c.as_int());
-        case type::floating:
-            return value(c.as_double());
-        case type::string:
-            return value(std::string(c.as_string()));
-        case type::array:
-        {
-            array arr;
-            arr.reserve(c.size());
-            for (const cursor el : c.elements())
-                arr.push_back(to_value(el));
-            return value(std::move(arr));
-        }
-        default:
-        { // type::object
-            object obj;
-            obj.reserve(c.size());
-            for (const auto [key, val] : c.members())
-                obj.emplace_back(std::string(key), to_value(val));
-            return value(std::move(obj));
-        }
-        }
-    }
+    [[nodiscard]] value to_value(const cursor &c);
 
 } // namespace catalyst::resource::json

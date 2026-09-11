@@ -12,8 +12,6 @@
 #include <cstring>
 #include <iterator>
 #include <optional>
-#include <stdexcept>
-#include <string>
 #include <string_view>
 
 #include "error.hpp"
@@ -97,6 +95,13 @@ namespace catalyst::resource::json
      * @class cursor
      * @brief A non-owning handle to one node of a @ref document.
      *
+     * @note Unlike the rest of the module, the navigation members and the raw tape reads are defined
+     * here rather than in tape.cpp. They are two or three instructions each and a traversal calls
+     * them once per node, so out-of-lining them turns a walk into one call per node: measured on
+     * `bench/json`, doing that cost 18-37% of document walk throughput, which the inline definitions
+     * recover in full. The typed accessors and the lookups, which do real work per call, are in the
+     * TU with everything else.
+     *
      * A cursor is a nullable handle in the same spirit as a pointer: a default-constructed cursor is
      * invalid (see @ref valid), and that is how @ref find reports an absent key and how an empty
      * document reports its root. Every other member requires a valid cursor. Cursors borrow from the
@@ -161,42 +166,18 @@ namespace catalyst::resource::json
         /// @{
 
         /// @throws type_error if the node is not a boolean.
-        [[nodiscard]] bool as_bool() const
-        {
-            if (tag() == detail::tape::t_true)
-                return true;
-            if (tag() == detail::tape::t_false)
-                return false;
-            throw type_error("value is not a boolean");
-        }
+        [[nodiscard]] bool as_bool() const;
 
         /// @throws type_error if the node is not an integer.
-        [[nodiscard]] std::int64_t as_int() const
-        {
-            if (!is_integer())
-                throw type_error("value is not an integer");
-            return raw_int();
-        }
+        [[nodiscard]] std::int64_t as_int() const;
 
         /// @brief The numeric payload as a `double`; integers are widened.
         /// @throws type_error if the node is not a number.
-        [[nodiscard]] double as_double() const
-        {
-            if (is_integer())
-                return static_cast<double>(raw_int());
-            if (is_floating())
-                return raw_double();
-            throw type_error("value is not a number");
-        }
+        [[nodiscard]] double as_double() const;
 
         /// @brief The string payload as a view into the document's arena.
         /// @throws type_error if the node is not a string.
-        [[nodiscard]] std::string_view as_string() const
-        {
-            if (!is_string())
-                throw type_error("value is not a string");
-            return raw_string();
-        }
+        [[nodiscard]] std::string_view as_string() const;
 
         /// @}
 
@@ -205,40 +186,16 @@ namespace catalyst::resource::json
         /// @{
 
         /// @brief The boolean payload, or `std::nullopt` if this is not a boolean.
-        [[nodiscard]] std::optional<bool> try_bool() const noexcept
-        {
-            if (tag() == detail::tape::t_true)
-                return true;
-            if (tag() == detail::tape::t_false)
-                return false;
-            return std::nullopt;
-        }
+        [[nodiscard]] std::optional<bool> try_bool() const noexcept;
 
         /// @brief The integer payload, or `std::nullopt` if this is not an integer.
-        [[nodiscard]] std::optional<std::int64_t> try_int() const noexcept
-        {
-            if (is_integer())
-                return raw_int();
-            return std::nullopt;
-        }
+        [[nodiscard]] std::optional<std::int64_t> try_int() const noexcept;
 
         /// @brief The numeric payload as a `double` (integers widened), or `std::nullopt` if not a number.
-        [[nodiscard]] std::optional<double> try_double() const noexcept
-        {
-            if (is_integer())
-                return static_cast<double>(raw_int());
-            if (is_floating())
-                return raw_double();
-            return std::nullopt;
-        }
+        [[nodiscard]] std::optional<double> try_double() const noexcept;
 
         /// @brief A view of the string payload, or `std::nullopt` if this is not a string.
-        [[nodiscard]] std::optional<std::string_view> try_string() const noexcept
-        {
-            if (is_string())
-                return raw_string();
-            return std::nullopt;
-        }
+        [[nodiscard]] std::optional<std::string_view> try_string() const noexcept;
 
         /// @}
 
@@ -319,15 +276,7 @@ namespace catalyst::resource::json
          * @throws type_error if this is not an object.
          * @throws std::out_of_range if @p key is absent.
          */
-        [[nodiscard]] cursor at(std::string_view key) const
-        {
-            if (!is_object())
-                throw type_error("value is not an object");
-            const cursor c = find(key);
-            if (!c.valid())
-                throw std::out_of_range("object has no key '" + std::string(key) + "'");
-            return c;
-        }
+        [[nodiscard]] cursor at(std::string_view key) const;
 
         /// @copydoc at
         [[nodiscard]] cursor operator[](std::string_view key) const { return at(key); }
@@ -368,12 +317,7 @@ namespace catalyst::resource::json
             c_ = c_.next_sibling();
             return *this;
         }
-        element_iterator operator++(int) noexcept
-        {
-            auto t = *this;
-            ++*this;
-            return t;
-        }
+        element_iterator operator++(int) noexcept;
         [[nodiscard]] bool operator==(const element_iterator &o) const noexcept { return c_.idx_ == o.c_.idx_; }
 
     private:
@@ -403,12 +347,7 @@ namespace catalyst::resource::json
             key_ = key_.next_sibling().next_sibling();
             return *this;
         }
-        member_iterator operator++(int) noexcept
-        {
-            auto t = *this;
-            ++*this;
-            return t;
-        }
+        member_iterator operator++(int) noexcept;
         [[nodiscard]] bool operator==(const member_iterator &o) const noexcept { return key_.idx_ == o.key_.idx_; }
 
     private:
@@ -427,29 +366,6 @@ namespace catalyst::resource::json
         if (!is_object())
             throw type_error("value is not an object");
         return {member_iterator(first_child()), member_iterator(next_sibling())};
-    }
-
-    inline cursor cursor::operator[](std::size_t i) const
-    {
-        std::size_t k = 0;
-        for (const cursor el : elements())
-            if (k++ == i)
-                return el;
-        throw std::out_of_range("array index out of range");
-    }
-
-    inline cursor cursor::find(std::string_view key) const noexcept
-    {
-        if (!is_object())
-            return cursor();
-        const member_iterator last(next_sibling());
-        for (member_iterator it(first_child()); it != last; ++it)
-        {
-            const member m = *it;
-            if (m.key == key)
-                return m.value;
-        }
-        return cursor();
     }
 
 } // namespace catalyst::resource::json

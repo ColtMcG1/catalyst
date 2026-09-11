@@ -7,7 +7,9 @@
 
 #pragma once
 
+#include <catalyst/resource/csv/csv.hpp>
 #include <catalyst/resource/json/json.hpp>
+#include <catalyst/resource/uri/uri.hpp>
 
 /**
  * @namespace catalyst::resource

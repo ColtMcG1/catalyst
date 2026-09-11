@@ -11,7 +11,6 @@
 #include <cstdint>
 #include <initializer_list>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -193,33 +192,7 @@ namespace catalyst::resource::json
          * overload and yields the one-element array `[true]`; write `value v = true;` or `value(true)`
          * for a scalar.
          */
-        value(std::initializer_list<value> init)
-        {
-            bool object_like = init.size() > 0;
-            for (const value &el : init)
-            {
-                if (!(el.is_array() && el.as_array().size() == 2 && el.as_array().front().is_string()))
-                {
-                    object_like = false;
-                    break;
-                }
-            }
-            if (object_like)
-            {
-                object obj;
-                obj.reserve(init.size());
-                for (const value &el : init)
-                {
-                    const array &pair = el.as_array();
-                    obj.emplace_back(pair[0].as_string(), pair[1]);
-                }
-                data_ = std::move(obj);
-            }
-            else
-            {
-                data_ = array(init);
-            }
-        }
+        value(std::initializer_list<value> init);
 
         /// @}
 
@@ -267,12 +240,7 @@ namespace catalyst::resource::json
          * @brief Access the numeric payload as a `double`; integers are widened.
          * @throws type_error if the value is not a number.
          */
-        [[nodiscard]] double as_double() const
-        {
-            if (const auto *i = std::get_if<std::int64_t>(&data_))
-                return static_cast<double>(*i);
-            return expect<double>("a number");
-        }
+        [[nodiscard]] double as_double() const;
 
         /**
          * @fn as_string()
@@ -316,21 +284,11 @@ namespace catalyst::resource::json
         [[nodiscard]] std::optional<std::int64_t> try_int() const noexcept { return maybe<std::int64_t>(); }
 
         /// @brief The numeric payload as a `double` (integers widened), or `std::nullopt` if not a number.
-        [[nodiscard]] std::optional<double> try_double() const noexcept
-        {
-            if (const auto *i = std::get_if<std::int64_t>(&data_))
-                return static_cast<double>(*i);
-            return maybe<double>();
-        }
+        [[nodiscard]] std::optional<double> try_double() const noexcept;
 
         /// @brief A view of the string payload, or `std::nullopt` if this is not a string.
         /// @note The view borrows from this value and is invalidated by any mutation of it.
-        [[nodiscard]] std::optional<std::string_view> try_string() const noexcept
-        {
-            if (const auto *s = std::get_if<std::string>(&data_))
-                return std::string_view(*s);
-            return std::nullopt;
-        }
+        [[nodiscard]] std::optional<std::string_view> try_string() const noexcept;
 
         /// @brief A pointer to the array payload (const or mutable, matching `this`), or `nullptr`.
         template <class Self>
@@ -353,14 +311,7 @@ namespace catalyst::resource::json
          * @brief The number of elements in the array or object.
          * @return The element count, or 0 if the value is neither an array nor an object.
          */
-        [[nodiscard]] std::size_t size() const noexcept
-        {
-            if (const auto *a = std::get_if<array>(&data_))
-                return a->size();
-            if (const auto *o = std::get_if<object>(&data_))
-                return o->size();
-            return 0;
-        }
+        [[nodiscard]] std::size_t size() const noexcept;
 
         /// @name Array access
         /// @{
@@ -417,14 +368,7 @@ namespace catalyst::resource::json
          * @throws type_error if this is not an object.
          * @throws std::out_of_range if @p key is absent.
          */
-        [[nodiscard]] const value &at(std::string_view key) const
-        {
-            const object &obj = as_object();
-            for (const auto &[k, v] : obj)
-                if (k == key)
-                    return v;
-            throw std::out_of_range("object has no key '" + std::string(key) + "'");
-        }
+        [[nodiscard]] const value &at(std::string_view key) const;
 
         /// @copydoc at(std::string_view key)
         [[nodiscard]] const value &operator[](std::string_view key) const { return at(key); }
@@ -436,17 +380,7 @@ namespace catalyst::resource::json
          * Inserts a null value when the key is absent, turning a null value into an empty object first.
          * @throws type_error if this is neither null nor an object.
          */
-        value &operator[](std::string_view key)
-        {
-            if (is_null())
-                data_ = object{};
-            object &obj = as_object();
-            for (auto &[k, v] : obj)
-                if (k == key)
-                    return v;
-            obj.emplace_back(std::string(key), value{});
-            return obj.back().second;
-        }
+        value &operator[](std::string_view key);
 
         /// @}
 

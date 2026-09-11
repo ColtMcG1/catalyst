@@ -15,6 +15,7 @@
 #include <catalyst/input/input.hpp>
 #include <catalyst/logging/logging.hpp>
 #include <catalyst/platform/window.hpp>
+#include <catalyst/text/utf8.hpp>
 
 #include <chrono>
 #include <string>
@@ -25,6 +26,7 @@ namespace platform = catalyst::platform;
 namespace input = catalyst::input;
 namespace events = catalyst::events;
 namespace logging = catalyst::logging;
+namespace text = catalyst::text;
 
 using namespace catalyst::input::bind;
 using namespace std::chrono_literals;
@@ -36,35 +38,6 @@ namespace
     {
         static constexpr const char *name = "input_events";
     };
-
-    std::string to_utf8(std::u32string_view text)
-    {
-        std::string out;
-        for (char32_t cp : text)
-        {
-            if (cp < 0x80)
-                out += static_cast<char>(cp);
-            else if (cp < 0x800)
-            {
-                out += static_cast<char>(0xC0 | (cp >> 6));
-                out += static_cast<char>(0x80 | (cp & 0x3F));
-            }
-            else if (cp < 0x10000)
-            {
-                out += static_cast<char>(0xE0 | (cp >> 12));
-                out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-                out += static_cast<char>(0x80 | (cp & 0x3F));
-            }
-            else
-            {
-                out += static_cast<char>(0xF0 | (cp >> 18));
-                out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
-                out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-                out += static_cast<char>(0x80 | (cp & 0x3F));
-            }
-        }
-        return out;
-    }
 
     std::string modifiers_to_string(input::key_modifiers m)
     {
@@ -175,7 +148,7 @@ int main()
         });
 
     const auto sub_text = bus.add_listener<input::text_input_event>([](const input::text_input_event &e)
-        { logging::info<example_log>("text    \"{}\"", to_utf8(e.text())); });
+        { logging::info<example_log>("text    \"{}\"", text::utf8::encode(e.text())); });
 
     const auto sub_click = bus.add_listener<input::mouse_button_event>([](const input::mouse_button_event &e)
         {
