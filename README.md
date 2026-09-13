@@ -12,6 +12,32 @@ The goal of Catalyst is to offer developers a powerful yet easy-to-use toolkit f
 - Modular architecture for easy extension
 - Comprehensive documentation and examples
 
+## Requirements
+
+Catalyst is written against C++23 and uses four features that are only just becoming available:
+deducing this, `std::expected`, `std::forward_like` and `std::move_only_function`. Very few
+toolchains implement all four, so the supported list is short:
+
+| Toolchain | Status |
+| --- | --- |
+| GCC 14 or newer | Supported |
+| MSVC 19.40 or newer (Visual Studio 2022 17.10+) | Supported |
+| Clang 18 / 19 / 20 | **Does not build.** Against libstdc++, `std::forward_like` fails to compile; against libc++, there is no `std::move_only_function`. |
+| Apple Clang | **Does not build**, for the same reason as Clang with libc++. |
+
+CMake checks for all four at configure time and stops with a readable message rather than letting
+the build fail hundreds of template errors later. On Ubuntu 24.04 the default `g++` is 13 and will
+not work — install `g++-14` and point CMake at it:
+
+```bash
+sudo apt install g++-14
+cmake -S . -B build -DCMAKE_CXX_COMPILER=g++-14
+```
+
+CMake 3.16 or newer is required. Everything else is optional: see
+[CMake Options](#cmake-options) for the module switches and
+[Backend selection](#cmake-options) for what each backend needs.
+
 ## Getting Started
 
 To get started with Catalyst, follow these steps:
@@ -174,9 +200,15 @@ Catalyst is modular: you can link individual modules, or link the monolithic umb
   - `CATALYST_AUDIO_BACKEND` (default: `auto`) values: `auto`, `win32`, `null`
   - `CATALYST_PLATFORM_BACKEND` (default: `auto`) values: `auto`, `win32`, `null`
   - `CATALYST_RENDERING_BACKEND` (default: `auto`) values: `auto`, `d3d12`, `vulkan`, `null`
+    - `auto` prefers Vulkan and falls back to `null` when no Vulkan SDK is present, so a fresh clone always
+      configures. CMake prints which one it picked. The `null` backend records state and draws nothing — if you
+      wanted a renderer that draws, install a Vulkan SDK and reconfigure.
     - `vulkan` needs a Vulkan SDK (1.3 or newer) that CMake's `find_package(Vulkan)` can locate, e.g. via the
-      `VULKAN_SDK` environment variable, and a driver exposing Vulkan 1.3. Shaders are consumed as SPIR-V;
-      `scripts/embed_spirv.py` compiles GLSL with `glslc` and embeds the result in a header.
+      `VULKAN_SDK` environment variable, and a driver exposing Vulkan 1.3. Naming it explicitly makes a missing
+      SDK an error rather than a fallback. Shaders are consumed as SPIR-V; the SPIR-V is committed, and
+      `scripts/embed_spirv.py` regenerates it with `glslc` after a shader change.
+    - `d3d12` is an identity stub whose resource layer is the `null` bookkeeping implementation: it records state
+      and draws nothing. It stays opt-in until it is real.
 
 Example: build only a subset of modules (no monolithic target):
 

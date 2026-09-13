@@ -6,6 +6,13 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+
+# Fail here, with one sentence, rather than several hundred lines of template errors partway
+# through the build. See cmake/CatalystCompilerSupport.cmake for what is checked and why.
+include(CatalystCompilerSupport)
+catalyst_require_cxx23_support()
+
 # When using MSVC-style debug info (/Zi) with parallel builds, multiple compiler
 # processes can contend for the shared PDB and appear to hang. /FS forces
 # serialized PDB writes.

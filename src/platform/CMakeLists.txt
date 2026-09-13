@@ -1,8 +1,8 @@
-# The window backends buffer events in catalyst::core's event_queue and window.hpp exposes core event types, so the
-# platform module cannot be built without the core module.
-if(NOT TARGET catalyst::core)
-  message(FATAL_ERROR "Catalyst platform requires CATALYST_BUILD_CORE to be enabled")
-endif()
+# This module used to require catalyst::core, on the grounds that the window backends buffered
+# events in a core event_queue and window.hpp exposed core event types. Neither is true any more:
+# nothing under include/catalyst/platform or src/platform includes a core header, and the events
+# the backends publish go to a catalyst::events::bus. All that survived was a FATAL_ERROR that made
+# -DCATALYST_BUILD_CORE=OFF fail to configure for no reason, so it is gone.
 
 add_library(catalyst_platform STATIC
   platform.cpp
@@ -17,8 +17,6 @@ target_include_directories(catalyst_platform
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-
-target_link_libraries(catalyst_platform PUBLIC catalyst::core)
 
 set(CATALYST_PLATFORM_BACKEND "auto" CACHE STRING "Platform backend (auto|win32|null)")
 set_property(CACHE CATALYST_PLATFORM_BACKEND PROPERTY STRINGS auto win32 null)
@@ -52,7 +50,7 @@ if(_catalyst_platform_backend STREQUAL "win32")
 
   # dwmapi: DwmGetCompositionTimingInfo supplies the display refresh period used to pace frames during a modal resize
   # loop, and DwmSetWindowAttribute selects the dark window frame.
-  target_link_libraries(catalyst_platform_backend_win32 PUBLIC dwmapi catalyst::core)
+  target_link_libraries(catalyst_platform_backend_win32 PUBLIC dwmapi)
 
   # UTF-8 conversion, run-time entry-point lookup and the <windows.h> include, shared with the input
   # and audio backends. PUBLIC because win32_helpers.hpp re-exports the string helpers.
@@ -71,8 +69,6 @@ elseif(_catalyst_platform_backend STREQUAL "null")
       ${CMAKE_CURRENT_SOURCE_DIR}
       ${PROJECT_SOURCE_DIR}/include
   )
-
-  target_link_libraries(catalyst_platform_backend_null PUBLIC catalyst::core)
 
   target_link_libraries(catalyst_platform PRIVATE catalyst_platform_backend_null)
 else()

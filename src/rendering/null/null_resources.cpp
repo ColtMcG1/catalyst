@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file
@@ -374,11 +374,25 @@ namespace catalyst::rendering::detail
         return queue_last_submitted(device, kind);
     }
 
-    std::expected<void, error> queue_wait(resource_id device, queue_kind /*kind*/, std::uint64_t /*value*/,
+    std::expected<void, error> queue_wait(resource_id device, queue_kind kind, std::uint64_t value,
                                           std::chrono::nanoseconds /*timeout*/) noexcept
     {
-        if (!find(g_devices, device))
+        if (value == 0)
+            return {};
+
+        const device_state *dev = find(g_devices, device);
+        if (!dev)
             return std::unexpected(make_error(error_code::invalid_argument, "queue_wait"));
+
+        // Naming work that was never submitted is a caller error rather than a wait, because
+        // nothing will ever signal it -- the same answer the Vulkan backend gives, and the reason
+        // this backend cannot just return success for every value. There is no GPU, so the wait
+        // itself never blocks and the timeout never matters: `completed` and `last_submitted` are
+        // the same number here (see device_state::timelines), which collapses Vulkan's two
+        // comparisons into this one.
+        if (value > dev->timelines[static_cast<std::size_t>(kind)])
+            return std::unexpected(make_error(error_code::invalid_argument, "queue_wait"));
+
         return {};
     }
 

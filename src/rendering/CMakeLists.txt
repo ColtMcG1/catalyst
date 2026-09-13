@@ -29,14 +29,33 @@ target_link_libraries(catalyst_rendering PRIVATE catalyst::logging)
 set(CATALYST_RENDERING_BACKEND "auto" CACHE STRING "Rendering backend (auto|d3d12|vulkan|null)")
 set_property(CACHE CATALYST_RENDERING_BACKEND PROPERTY STRINGS auto d3d12 vulkan null)
 
-# `auto` resolves to Vulkan on every platform, which is the backend Catalyst targets for Windows and
+# `auto` prefers Vulkan on every platform, which is the backend Catalyst targets for Windows and
 # Linux. It used to resolve to d3d12 on Windows, and that was a trap: the d3d12 and metal backends
 # are identity stubs whose resource layer is the null bookkeeping implementation, so an `auto` build
 # on Windows silently produced a renderer that recorded state and drew nothing. Both stay selectable
 # by name, and stay opt-in until they are real.
+#
+# `auto` *prefers* rather than *resolves to* Vulkan because the SDK is not everywhere. Resolving to
+# it unconditionally meant `cmake -S . -B build` -- the command in the README -- failed at configure
+# time on any machine without a Vulkan SDK, which is most machines on a first clone. So `auto`
+# probes, and falls back to the null backend with a message saying what happened. Naming `vulkan`
+# explicitly still requires it and still fails loudly, because someone who asked for Vulkan by name
+# wants to hear that it is missing rather than get a renderer that draws nothing.
 set(_catalyst_rendering_backend "${CATALYST_RENDERING_BACKEND}")
 if(_catalyst_rendering_backend STREQUAL "auto")
-  set(_catalyst_rendering_backend "vulkan")
+  find_package(Vulkan QUIET)
+
+  if(Vulkan_FOUND)
+    set(_catalyst_rendering_backend "vulkan")
+    message(STATUS "Catalyst: rendering backend 'auto' resolved to 'vulkan' (${Vulkan_VERSION})")
+  else()
+    set(_catalyst_rendering_backend "null")
+    message(STATUS
+      "Catalyst: no Vulkan SDK found, so rendering backend 'auto' resolved to 'null'. "
+      "The null backend records state and draws nothing; it builds and tests everywhere. "
+      "For a renderer that draws, install a Vulkan SDK (1.3+) and reconfigure, or set "
+      "-DCATALYST_RENDERING_BACKEND=vulkan to make a missing SDK an error.")
+  endif()
 endif()
 
 # CPU-side bookkeeping implementation of the resource contract (src/rendering/detail_backend.hpp).
