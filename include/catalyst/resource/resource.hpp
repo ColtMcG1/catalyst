@@ -7,6 +7,17 @@
 
 #pragma once
 
+// The asset system: naming, sourcing, ownership.
+#include <catalyst/resource/blob.hpp>
+#include <catalyst/resource/error.hpp>
+#include <catalyst/resource/handle.hpp>
+#include <catalyst/resource/image.hpp>
+#include <catalyst/resource/loader.hpp>
+#include <catalyst/resource/registry.hpp>
+#include <catalyst/resource/source.hpp>
+#include <catalyst/resource/vfs.hpp>
+
+// The document formats assets are written in.
 #include <catalyst/resource/csv/csv.hpp>
 #include <catalyst/resource/json/json.hpp>
 #include <catalyst/resource/uri/uri.hpp>

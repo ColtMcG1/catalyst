@@ -538,11 +538,10 @@ namespace catalyst::rendering::detail::vulkan
     // three answers when it records a buffer-to-image copy.
     // -------------------------------------------------------------------------
 
-    /** Tightly packed size of mip 0, layer 0. */
+    /** Tightly packed size of mip 0, layer 0. Block-aware: a compressed format rounds up to whole blocks. */
     inline std::size_t mip0_bytes(const texture_desc &desc) noexcept
     {
-        return static_cast<std::size_t>(desc.extent.width) * desc.extent.height * desc.extent.depth *
-               format_size_bytes(desc.pixel_format);
+        return static_cast<std::size_t>(format_image_size_bytes(desc.pixel_format, desc.extent));
     }
 
     inline VkExtent3D image_extent(const texture_desc &desc) noexcept

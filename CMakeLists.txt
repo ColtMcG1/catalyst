@@ -28,6 +28,11 @@ option(CATALYST_BUILD_RESOURCE "Build Catalyst resource module" ON)
 option(CATALYST_BUILD_SCENE "Build Catalyst scene module" ON)
 option(CATALYST_BUILD_UI "Build Catalyst UI module" ON)
 option(CATALYST_BUILD_UTILS "Build Catalyst utils module" ON)
+# Image decoding in catalyst::resource. ON fetches stb_image at a pinned commit (cmake/stb.cmake),
+# which needs network access the first time a build tree is configured. OFF keeps the resource
+# module dependency-free and makes load_image report unsupported_format instead of decoding.
+option(CATALYST_RESOURCE_STB "Fetch stb_image and build the resource module's image decoders" ON)
+
 option(CATALYST_BUILD_EXAMPLES "Build Catalyst examples" ON)
 option(CATALYST_BUILD_TESTS "Build Catalyst tests" ON)
 option(CATALYST_BUILD_BENCHMARKS "Build Catalyst benchmarks" ON)

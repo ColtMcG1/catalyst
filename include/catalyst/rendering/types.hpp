@@ -234,9 +234,40 @@ namespace catalyst::rendering
         d32_float,
         d24_unorm_s8_uint,
         d32_float_s8_uint,
+
+        // Block-compressed. Appended after the uncompressed set so that adding one never renumbers an existing format, and
+        // grouped because they all break an assumption the rest of this enum satisfies: a single texel has no size, only a
+        // 4x4 block does. `format_size_bytes` answers 0 for every one of them; the arithmetic that is correct for both
+        // kinds is `format_image_size_bytes`.
+        //
+        // Vulkan's BC1_RGB_* has no DXGI counterpart and is deliberately absent. Its block encoding is byte-identical to
+        // BC1_RGBA_* -- the difference is only whether the sampler is promised opaque alpha -- so a reader that meets one
+        // maps it onto the RGBA spelling and loses nothing but a promise.
+        bc1_rgba_unorm,
+        bc1_rgba_unorm_srgb,
+        bc2_unorm,
+        bc2_unorm_srgb,
+        bc3_unorm,
+        bc3_unorm_srgb,
+        bc4_unorm,
+        bc4_snorm,
+        bc5_unorm,
+        bc5_snorm,
+        bc6h_ufloat,
+        bc6h_sfloat,
+        bc7_unorm,
+        bc7_unorm_srgb,
     };
 
-    /** @brief Size in bytes of one texel / vertex element of `f`; 0 for `format::unknown`. */
+    /**
+     * @brief Size in bytes of one texel / vertex element of `f`; 0 for `format::unknown` **and for every block-compressed
+     * format**.
+     * @details Zero rather than the block size, deliberately. There is no such thing as one texel's worth of BC7, and the
+     * expression this function exists to be multiplied into -- `width * height * depth * format_size_bytes(f)` -- is not
+     * merely imprecise for a block format, it is wrong by the block area. Answering 0 turns every such site into a visibly
+     * empty allocation instead of one that is silently 16x too small. Use @ref format_image_size_bytes, which is correct
+     * for both kinds, or @ref format_block_size_bytes when you genuinely mean one block.
+     */
     [[nodiscard]] constexpr std::uint32_t format_size_bytes(format f) noexcept
     {
         switch (f)
@@ -262,8 +293,95 @@ namespace catalyst::rendering
         case format::d32_float:         return 4;
         case format::d24_unorm_s8_uint: return 4;
         case format::d32_float_s8_uint: return 8;
+
+        // Block-compressed: see the note above. One texel has no size here.
+        case format::bc1_rgba_unorm:
+        case format::bc1_rgba_unorm_srgb:
+        case format::bc2_unorm:
+        case format::bc2_unorm_srgb:
+        case format::bc3_unorm:
+        case format::bc3_unorm_srgb:
+        case format::bc4_unorm:
+        case format::bc4_snorm:
+        case format::bc5_unorm:
+        case format::bc5_snorm:
+        case format::bc6h_ufloat:
+        case format::bc6h_sfloat:
+        case format::bc7_unorm:
+        case format::bc7_unorm_srgb:  return 0;
         }
         return 0;
+    }
+
+    /** @brief True when `f` stores texels in fixed-size blocks rather than individually. */
+    [[nodiscard]] constexpr bool is_block_compressed(format f) noexcept
+    {
+        switch (f)
+        {
+        case format::bc1_rgba_unorm:
+        case format::bc1_rgba_unorm_srgb:
+        case format::bc2_unorm:
+        case format::bc2_unorm_srgb:
+        case format::bc3_unorm:
+        case format::bc3_unorm_srgb:
+        case format::bc4_unorm:
+        case format::bc4_snorm:
+        case format::bc5_unorm:
+        case format::bc5_snorm:
+        case format::bc6h_ufloat:
+        case format::bc6h_sfloat:
+        case format::bc7_unorm:
+        case format::bc7_unorm_srgb:  return true;
+        default:                      return false;
+        }
+    }
+
+    /**
+     * @brief Width in texels of one compression block; 1 for an uncompressed format.
+     * @details Reported as width and height separately rather than as one edge length, even though every block format in
+     * this enum is 4x4, because non-square blocks are the normal case in the families that would be added next and a
+     * caller written against a square assumption would then be silently wrong rather than obviously wrong.
+     */
+    [[nodiscard]] constexpr std::uint32_t format_block_width(format f) noexcept
+    {
+        return is_block_compressed(f) ? 4u : 1u;
+    }
+
+    /** @brief Height in texels of one compression block; 1 for an uncompressed format. */
+    [[nodiscard]] constexpr std::uint32_t format_block_height(format f) noexcept
+    {
+        return is_block_compressed(f) ? 4u : 1u;
+    }
+
+    /**
+     * @brief Size in bytes of one compression block, or of one texel for an uncompressed format.
+     * @details The unit a tightly packed surface is actually made of, whichever kind `f` is, which is what makes it the
+     * right multiplicand in @ref format_image_size_bytes.
+     */
+    [[nodiscard]] constexpr std::uint32_t format_block_size_bytes(format f) noexcept
+    {
+        switch (f)
+        {
+        // 64 bits per 4x4 block: one colour endpoint pair, or one interpolated channel.
+        case format::bc1_rgba_unorm:
+        case format::bc1_rgba_unorm_srgb:
+        case format::bc4_unorm:
+        case format::bc4_snorm:       return 8;
+
+        // 128 bits per 4x4 block.
+        case format::bc2_unorm:
+        case format::bc2_unorm_srgb:
+        case format::bc3_unorm:
+        case format::bc3_unorm_srgb:
+        case format::bc5_unorm:
+        case format::bc5_snorm:
+        case format::bc6h_ufloat:
+        case format::bc6h_sfloat:
+        case format::bc7_unorm:
+        case format::bc7_unorm_srgb:  return 16;
+
+        default:                      return format_size_bytes(f);
+        }
     }
 
     [[nodiscard]] constexpr bool is_depth_format(format f) noexcept
@@ -279,7 +397,37 @@ namespace catalyst::rendering
 
     [[nodiscard]] constexpr bool is_srgb_format(format f) noexcept
     {
-        return f == format::rgba8_unorm_srgb || f == format::bgra8_unorm_srgb;
+        switch (f)
+        {
+        case format::rgba8_unorm_srgb:
+        case format::bgra8_unorm_srgb:
+        case format::bc1_rgba_unorm_srgb:
+        case format::bc2_unorm_srgb:
+        case format::bc3_unorm_srgb:
+        case format::bc7_unorm_srgb:  return true;
+        default:                      return false;
+        }
+    }
+
+    /**
+     * @brief The sRGB counterpart of `f`, or `f` unchanged when it has none or already is one.
+     * @details A pure spelling change: the two formats are byte-identical on the wire and differ only in what the sampler
+     * is told the bytes mean. It exists so a caller who knows an asset is colour -- which no image container states
+     * reliably -- can say so without a switch of its own. There is deliberately no inverse: the formats with no linear
+     * counterpart are exactly the ones where an accidental demotion would corrupt a lookup table silently.
+     */
+    [[nodiscard]] constexpr format to_srgb_format(format f) noexcept
+    {
+        switch (f)
+        {
+        case format::rgba8_unorm:     return format::rgba8_unorm_srgb;
+        case format::bgra8_unorm:     return format::bgra8_unorm_srgb;
+        case format::bc1_rgba_unorm:  return format::bc1_rgba_unorm_srgb;
+        case format::bc2_unorm:       return format::bc2_unorm_srgb;
+        case format::bc3_unorm:       return format::bc3_unorm_srgb;
+        case format::bc7_unorm:       return format::bc7_unorm_srgb;
+        default:                      return f;
+        }
     }
 
     /**
@@ -317,6 +465,27 @@ namespace catalyst::rendering
 
         friend constexpr bool operator==(const extent3d &, const extent3d &) noexcept = default;
     };
+
+    /**
+     * @brief Tightly packed size in bytes of one mip level of one array slice in `f`, at `extent`.
+     * @details The one size computation that is correct for both kinds of format, and the reason `format_size_bytes`
+     * answers 0 for the block-compressed ones rather than something plausible. A block format rounds each dimension up to
+     * a whole block -- a 5x5 BC7 surface occupies the same 2x2 blocks a 8x8 one does -- which is why this cannot be
+     * expressed as a multiplication by a per-texel size.
+     *
+     * Returns `std::uint64_t` because the product of a 16k cube map slice and a 16-byte block does not fit a 32-bit
+     * count, and a caller narrowing deliberately is better than this function doing it silently.
+     */
+    [[nodiscard]] constexpr std::uint64_t format_image_size_bytes(format f, extent3d extent) noexcept
+    {
+        const std::uint32_t block_w = format_block_width(f);
+        const std::uint32_t block_h = format_block_height(f);
+
+        const std::uint64_t blocks_x = (static_cast<std::uint64_t>(extent.width) + block_w - 1) / block_w;
+        const std::uint64_t blocks_y = (static_cast<std::uint64_t>(extent.height) + block_h - 1) / block_h;
+
+        return blocks_x * blocks_y * extent.depth * format_block_size_bytes(f);
+    }
 
     /**
      * @brief Viewport transform in framebuffer pixels. Depth range follows the [0, 1] convention on every backend.

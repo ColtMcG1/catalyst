@@ -208,8 +208,9 @@ namespace catalyst::rendering::detail
 
         std::size_t texture_mip0_bytes(const texture_desc &desc) noexcept
         {
-            return static_cast<std::size_t>(desc.extent.width) * desc.extent.height * desc.extent.depth *
-                   format_size_bytes(desc.pixel_format);
+            // Block-aware: `format_size_bytes` is 0 for a compressed format, so the per-texel multiplication this
+            // replaced would have sized every BC texture at nothing.
+            return static_cast<std::size_t>(format_image_size_bytes(desc.pixel_format, desc.extent));
         }
 
         void create_swapchain_images(resource_id id, swapchain_state &sc)

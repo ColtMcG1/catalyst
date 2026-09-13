@@ -43,6 +43,24 @@ namespace catalyst::rendering::detail::vulkan
         case format::d32_float:         return VK_FORMAT_D32_SFLOAT;
         case format::d24_unorm_s8_uint: return VK_FORMAT_D24_UNORM_S8_UINT;
         case format::d32_float_s8_uint: return VK_FORMAT_D32_SFLOAT_S8_UINT;
+
+        // Block-compressed. `bc1_rgba_*` maps to Vulkan's RGBA spelling rather than its RGB one: the two encode
+        // identical blocks and differ only in the alpha a sampler is promised, so the RGBA form is correct for both and
+        // the RGB form is the one that would lose information.
+        case format::bc1_rgba_unorm:      return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
+        case format::bc1_rgba_unorm_srgb: return VK_FORMAT_BC1_RGBA_SRGB_BLOCK;
+        case format::bc2_unorm:           return VK_FORMAT_BC2_UNORM_BLOCK;
+        case format::bc2_unorm_srgb:      return VK_FORMAT_BC2_SRGB_BLOCK;
+        case format::bc3_unorm:           return VK_FORMAT_BC3_UNORM_BLOCK;
+        case format::bc3_unorm_srgb:      return VK_FORMAT_BC3_SRGB_BLOCK;
+        case format::bc4_unorm:           return VK_FORMAT_BC4_UNORM_BLOCK;
+        case format::bc4_snorm:           return VK_FORMAT_BC4_SNORM_BLOCK;
+        case format::bc5_unorm:           return VK_FORMAT_BC5_UNORM_BLOCK;
+        case format::bc5_snorm:           return VK_FORMAT_BC5_SNORM_BLOCK;
+        case format::bc6h_ufloat:         return VK_FORMAT_BC6H_UFLOAT_BLOCK;
+        case format::bc6h_sfloat:         return VK_FORMAT_BC6H_SFLOAT_BLOCK;
+        case format::bc7_unorm:           return VK_FORMAT_BC7_UNORM_BLOCK;
+        case format::bc7_unorm_srgb:      return VK_FORMAT_BC7_SRGB_BLOCK;
         }
         return VK_FORMAT_UNDEFINED;
     }
