@@ -1,0 +1,156 @@
+# Catalyst CI.
+#
+# Catalyst needs a C++23 toolchain that implements deducing this, std::expected, std::forward_like
+# and std::move_only_function (see cmake/CatalystCompilerSupport.cmake). Very little clears that bar
+# today: GCC 14+ and MSVC 19.40+ do, and Clang does not, with either standard library. So the matrix
+# names its compilers explicitly rather than taking the runner image's default, and the two jobs
+# that are expected to fail are marked non-blocking and kept anyway -- their result is the honest
+# status of that platform, and the day one goes green it should be promoted to required.
+#
+# Tests run against the `null` rendering backend. It is the one configuration that builds and runs
+# everywhere, and the runners have no GPU. The Vulkan backend is compiled but not run, in its own
+# job, so that backend code cannot rot unnoticed.
+
+name: CI
+
+on:
+  push:
+    branches: [main, master, "dev-*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    # Two entries are informational rather than blocking; see the comments on them below.
+    continue-on-error: ${{ matrix.experimental == true }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux / GCC 14
+            os: ubuntu-24.04
+            packages: g++-14
+            cc: gcc-14
+            cxx: g++-14
+
+          - name: Linux / Clang 20 + libstdc++ 14
+            os: ubuntu-24.04
+            # Expected to fail the configure-time check, and kept to track when that stops being
+            # true. Clang 18, 19 and 20 all reject libstdc++'s std::forward_like ("function with
+            # deduced return type cannot be used before it is defined"), and -stdlib=libc++ is not
+            # a way out: libc++ has no std::move_only_function. g++-14 is installed for its
+            # standard library headers, not its compiler.
+            packages: clang-20 g++-14
+            cc: clang-20
+            cxx: clang++-20
+            experimental: true
+
+          - name: Windows / MSVC
+            os: windows-2022
+
+          - name: macOS / Apple Clang
+            os: macos-15
+            # Same expectation as the Clang job above, for the same reasons: Apple Clang ships
+            # libc++ (no std::move_only_function), and pointing it at libstdc++ is not an option on
+            # macOS. Non-blocking, and kept because it is the honest status of macOS support.
+            experimental: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build ${{ matrix.packages }}
+
+      - name: Install Ninja
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+          CXXFLAGS: ${{ matrix.cxxflags }}
+        # No generator is forced on Windows: the image's Visual Studio generator is a multi-config
+        # one, which is why every build and test step below also passes --config / -C.
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCATALYST_BUILD_TESTS=ON
+          -DCATALYST_RENDERING_BACKEND=null
+          ${{ runner.os == 'Windows' && ' ' || '-G Ninja' }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build --build-config Release --output-on-failure --parallel
+
+  vulkan:
+    name: Linux / Vulkan backend (build only)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain and Vulkan headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14 libvulkan-dev
+
+      - name: Configure
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        # Named explicitly rather than left to `auto`, so a missing SDK fails this job instead of
+        # silently falling back to the null backend and testing nothing.
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCATALYST_RENDERING_BACKEND=vulkan
+
+      # Not run: the SPIR-V the backend consumes is committed, so this compiles and links without a
+      # shader compiler, but creating a device needs a GPU the runner does not have.
+      - name: Build
+        run: cmake --build build --parallel
+
+  configurations:
+    name: Module subsets (configure only)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14
+
+      # The module switches are the library's advertised feature, so something has to exercise them.
+      # Configure only for now: examples, tests and benchmarks are still added unconditionally, so a
+      # subset build links against modules that were switched off. Turn these into full builds once
+      # those trees are guarded.
+      - name: Configure subsets
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          set -eux
+          cmake -S . -B build-default -G Ninja
+          cmake -S . -B build-no-core -G Ninja -DCATALYST_BUILD_CORE=OFF
+          cmake -S . -B build-no-audio -G Ninja -DCATALYST_BUILD_AUDIO=OFF
+          cmake -S . -B build-no-stb -G Ninja -DCATALYST_RESOURCE_STB=OFF
+          cmake -S . -B build-subset -G Ninja \
+            -DCATALYST_BUILD_ALL=OFF \
+            -DCATALYST_BUILD_RENDERING=ON \
+            -DCATALYST_BUILD_UI=OFF \
+            -DCATALYST_BUILD_CORE=ON
