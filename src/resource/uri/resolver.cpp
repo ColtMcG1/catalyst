@@ -2,7 +2,7 @@
  * @file resolver.cpp
  * @brief Implements reference resolution and normalization, declared in resolver.hpp and
  * reference.hpp.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/uri/resolver.hpp>

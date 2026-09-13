@@ -7,7 +7,7 @@
  *
  * Because everything it does not do comes from `backend_base` - stats, failure reporting, notices,
  * the render dispatcher - what is left is exactly the part that is about being silent.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../detail_backend.hpp"

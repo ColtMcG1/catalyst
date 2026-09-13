@@ -9,7 +9,7 @@ Each shader becomes `inline constexpr std::uint32_t <name>[] = {...};` inside `n
 be checked in next to the sources so consumers do not need the Vulkan SDK at build time; re-run this script whenever a
 shader changes. glslc is taken from PATH or from $VULKAN_SDK/Bin.
 
-License: CDDL-1.0 (see LICENSE).
+License: MIT (see LICENSE).
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ def main() -> None:
         entries.append((name, rel, data))
 
     out = ["/**",
-           " * SPDX-License-Identifier: CDDL-1.0",
+           " * SPDX-License-Identifier: MIT",
            " * SPDX-FileCopyrightText: 2026-Current Catalyst",
            " *",
            " * @file",

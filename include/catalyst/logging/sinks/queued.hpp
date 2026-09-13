@@ -32,7 +32,7 @@
  *   - Whatever has not been drained when the `queued_sink` is destroyed is discarded, because the
  *     destructor has no way to know it is running on the owner's thread. Drain first if it matters.
  *
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

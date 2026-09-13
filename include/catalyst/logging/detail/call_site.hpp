@@ -8,7 +8,7 @@
  *
  * Callers never name this type; it exists so that `log::info("...")` records the line it was
  * written on.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

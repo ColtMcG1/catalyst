@@ -9,7 +9,7 @@
  * Text is carried inline as UTF-32 so an event is trivially copyable and never allocates. A platform that commits more
  * than `inline_capacity` code points at once splits it across consecutive events, so a consumer simply appends `text()`
  * to its buffer and never has to reassemble anything.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

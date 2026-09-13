@@ -2,7 +2,7 @@
 # Initializes the audio engine, enumerates the available backends and devices, and renders a short 440Hz test tone
 # through the render callback before logging the stream's health counters. Links the monolithic library when
 # available, otherwise the audio and logging modules.
-# License: CDDL-1.0 (see LICENSE).
+# License: MIT (see LICENSE).
 
 add_executable(catalyst_audio_playback
   main.cpp

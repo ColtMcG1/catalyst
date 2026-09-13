@@ -29,7 +29,7 @@
  *     move.bind(stick(gamepad_axis::left_x, gamepad_axis::left_y).deadzone(0.2f));
  *     move.bind(compose2d().up(key_code::w).down(key_code::s).left(key_code::a).right(key_code::d));
  *     screenshot.bind(key(key_code::p).with(key_code::left_control));
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

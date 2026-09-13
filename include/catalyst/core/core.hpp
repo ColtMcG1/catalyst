@@ -1,7 +1,7 @@
 /**
  * @file core.hpp
  * @brief Main header for the catalyst::core module.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

@@ -21,7 +21,7 @@
  *
  * An action with several bindings takes its value from whichever is being pushed hardest, so binding both a stick and
  * WASD to "move" behaves the way a player expects when they switch between them mid-game.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

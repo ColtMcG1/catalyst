@@ -5,7 +5,7 @@
  * @details This is the single definition of `create_backend` in the module; platform backends only
  * expose their own factory, so adding or removing one from the build can never produce duplicate or
  * missing symbols.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "detail_backend.hpp"

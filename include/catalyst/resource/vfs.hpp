@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file vfs.hpp
@@ -27,7 +27,7 @@
  * then read from it. A vfs whose mounts change under a concurrent read is a bug this class does not
  * try to make safe, because the alternative is a lock on the hot path for something that happens
  * twice per run.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

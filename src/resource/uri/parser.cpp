@@ -1,7 +1,7 @@
 /**
  * @file parser.cpp
  * @brief Implements the URI parser and composer declared in parser.hpp and reference.hpp.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/uri/parser.hpp>

@@ -2,7 +2,7 @@
  * @file keyboard.hpp
  * @brief Defines the key_code enumeration, which represents physical keys on a keyboard. The key codes are based on the USB HID Keyboard/Keypad usage IDs (usage page 0x07). This file also includes a function to convert key codes to their corresponding USB HID usage IDs. The key_code enumeration allows for consistent representation of keyboard keys across different platforms and input systems, while text entry is delivered separately via character/text input events.
  * @details The key_code enumeration provides a comprehensive list of physical keys on a keyboard, including letters, digits, function keys, and various control keys. Each key code corresponds to a specific physical key, and the values are aligned with the USB HID standard for keyboard input. This allows for consistent handling of keyboard input across different platforms and input systems. The to_usb_hid function provides a convenient way to convert key codes to their corresponding USB HID usage IDs, which can be useful when interfacing with low-level input APIs or when implementing custom input handling logic that requires knowledge of the underlying USB HID usage IDs. Text entry is handled separately through character or text input events, allowing for a clear distinction between physical key presses and the resulting text input, which can be affected by factors such as keyboard layout and modifier keys.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

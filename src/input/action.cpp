@@ -1,7 +1,7 @@
 /**
  * @file action.cpp
  * @brief Reading bindings, running interactions, and deciding an action's phase.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/input/action.hpp>

@@ -16,7 +16,7 @@
  *
  * Failures come back as `std::expected`, like every other seam in the module, rather than as the
  * exceptions this file used to throw and its caller used to flatten into one `platform_error`.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

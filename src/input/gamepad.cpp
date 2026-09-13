@@ -2,7 +2,7 @@
  * @file gamepad.cpp
  * @brief The dead-zone primitives. Everything else that used to live here is now in context.cpp (polling) or
  * calibration.cpp (learning a threshold).
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/input/gamepad.hpp>

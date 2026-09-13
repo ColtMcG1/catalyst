@@ -14,7 +14,7 @@
  * The UTF-8 conversion routines that used to live here are one implementation in
  * src/win32/strings.hpp, shared with the platform and input backends, and are re-exported into this
  * namespace so the backends keep spelling them `win32::wide_to_utf8`.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

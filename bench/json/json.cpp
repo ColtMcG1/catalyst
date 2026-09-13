@@ -6,7 +6,7 @@
  * owning `value` tree and the flat `document` tape, and how fast each serializes back out. Results are
  * reported in MB/s (bytes of JSON text per second) and Mval/s (scalar values per second), so the cost of
  * each scalar kind can be compared directly regardless of how many bytes it takes up.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <benchmark.hpp>

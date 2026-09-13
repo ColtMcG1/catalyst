@@ -5,7 +5,7 @@
  * @details The boundary cases are the whole point of a shared codec -- 0x7F/0x80, 0x7FF/0x800,
  * 0xFFFF/0x10000 are where a hand-rolled copy goes wrong -- so each is pinned against the byte
  * sequence the standard requires, not against another implementation of the same arithmetic.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

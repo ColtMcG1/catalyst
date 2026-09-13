@@ -5,7 +5,7 @@
  * cover the components RFC 3986 delimits with punctuation the parser had to find anyway; the
  * sub-parts of the authority are not among them, so `userinfo`, `host` and `port` split it again
  * here rather than costing three more offsets in every `uri` that has no authority at all.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/uri/reference.hpp>

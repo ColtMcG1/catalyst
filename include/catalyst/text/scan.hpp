@@ -15,7 +15,7 @@
  *
  * Both are total on their input: a `from` past the end returns `from`, and neither ever reads past
  * `s.size()`, so they are safe on a bare buffer with no sentinel.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

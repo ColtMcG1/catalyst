@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file detail/loader_impl.hpp
@@ -10,7 +10,7 @@
  * the shape that would let them share it is a callback or a coroutine wrapper around the whole
  * pipeline, which costs more in indirection and in stack lifetime hazards than the eight duplicated
  * lines cost in maintenance.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

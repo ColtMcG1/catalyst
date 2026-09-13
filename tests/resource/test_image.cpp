@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file test_image.cpp
@@ -11,7 +11,7 @@
  * recognised the bytes) and `decode_failed` (something did and then gave up), plus the hand-off
  * from a source decode to the mip filter. The cooked containers are a separate suite, since they
  * need no decoder and exist in builds this one does not -- see test_container.cpp.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

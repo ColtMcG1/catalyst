@@ -20,7 +20,7 @@
  *
  * Byte order is swapped in the same pass as the conversion rather than in a second sweep over the
  * block, since the block is almost certainly no longer in cache by then.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

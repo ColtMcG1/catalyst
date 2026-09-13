@@ -6,7 +6,7 @@
  * @details Centralising these keeps stream-position bookkeeping, silence fallback and load
  * measurement identical across WASAPI, ASIO, null and offline - so a stat means the same thing
  * whichever produced it, and a renderer sees the same block shape everywhere.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

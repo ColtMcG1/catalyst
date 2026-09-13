@@ -1,11 +1,11 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file registry_impl.hpp
  * @brief Definitions for the `catalyst::resource::registry` and `catalyst::resource::store`
  * templates. Included at the bottom of registry.hpp; never include this directly.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

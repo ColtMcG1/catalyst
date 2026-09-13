@@ -1,7 +1,7 @@
 /**
  * @file state.cpp
  * @brief Implementation of input_state.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/input/state.hpp>

@@ -1,10 +1,10 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file vfs.cpp
  * @brief Mount table, scheme dispatch and the read paths.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/vfs.hpp>

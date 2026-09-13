@@ -2,7 +2,7 @@
  * @file window.cpp
  * @brief Implementation of the window management functions for the Catalyst Platform library. This file contains the definitions of the functions declared in window.hpp, which provide an interface for creating, destroying, and managing windows in a platform-agnostic way. The actual implementation of these functions is delegated to platform-specific backends, which are defined in the detail_backend.hpp header and implemented in separate source files for each supported platform (e.g., Win32, X11, etc.). By using this approach, we can maintain a clean separation between the public API of the Catalyst Platform library and the underlying platform-specific details, allowing users to interact with windows without needing to worry about the complexities of different operating systems.
  * @details The Catalyst Platform library provides a collection of platform utilities and types commonly used in game development and real-time applications. By including the appropriate headers from the Catalyst Platform library, users can access all the functionality they need for their projects, such as creating windows, handling events, and interacting with the underlying operating system in a platform-agnostic way. This allows developers to focus on building their applications without worrying about the complexities of platform-specific code, while still having access to powerful tools for managing windows and events effectively.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/platform/window.hpp>
@@ -15,7 +15,7 @@
  * @namespace catalyst::platform::detail
  * @brief This header is included to access the platform-specific backend implementations for window management. The functions declared in detail_backend.hpp provide the actual implementations for creating, destroying, and managing windows on the underlying platform. By including this header, we can call these platform-specific functions from the public API functions defined in this source file, allowing us to maintain a clean separation between the public interface and the internal implementation details of the Catalyst Platform library. Users of the library should not include detail_backend.hpp directly or call its functions directly; instead, they should use the public API provided by window.hpp, which will internally call the appropriate backend functions as needed.
  * @details The detail_backend.hpp header contains the platform-specific implementations for window management and event handling. This includes functions for creating and destroying windows, retrieving native handles, managing event sinks, and other platform-specific operations. By including this header in the window.cpp source file, we can implement the public API functions declared in window.hpp by calling the appropriate backend functions defined in detail_backend.hpp. This allows us to provide a consistent and platform-agnostic interface for users of the Catalyst Platform library while still leveraging the specific capabilities of each supported platform through the backend implementations.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 #include "detail_backend.hpp"
 

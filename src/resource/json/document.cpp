@@ -6,7 +6,7 @@
  * what lets a cursor skip a whole subtree in constant time later. The sink's per-node callbacks are
  * templates on the parser's handle type and stay in the header; what is here is the buffer
  * management underneath them.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/json/document.hpp>

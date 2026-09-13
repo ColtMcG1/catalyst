@@ -6,7 +6,7 @@
  * the generalisation itself -- that the mask folding is right for one stop byte and for four, with
  * control bytes stopping the scan and with them treated as content -- so a new format can pick a stop
  * set with some confidence that the scanner will behave.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

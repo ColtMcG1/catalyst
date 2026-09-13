@@ -4,7 +4,7 @@
  * @details Every built-in kind's layout is built once, on first use, and shared by reference, so a hundred connected
  * devices of one kind cost one control list between them. Names are `string_view`s into static storage - either string
  * literals here or the tables key_name() and midi_note_name() already own.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/input/device.hpp>

@@ -17,7 +17,7 @@
  * called `render()` on a live stream" because @ref offline_stream is a separate type. What remains
  * of `unsupported_operation` is the honest case: a backend that cannot serve a configuration it
  * otherwise understands.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

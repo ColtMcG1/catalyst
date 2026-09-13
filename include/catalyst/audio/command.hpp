@@ -36,7 +36,7 @@
  * ring pointing the other way, and the game thread drains that one and destroys what it finds. The
  * two directions are two @ref command_ring objects; there is no separate type for the return path,
  * because it is the same mechanism with the threads swapped.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

@@ -5,7 +5,7 @@
  * them, @ref catalyst::resource::percent_encode decides what to escape with them, and normalization
  * decides what to unescape with them. They live in one place so that the grammar is stated once and
  * the three uses cannot drift apart.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

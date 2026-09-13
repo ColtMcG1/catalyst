@@ -25,7 +25,7 @@
  *     }
  *
  * See docs/input.md for the design and the tier roadmap.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

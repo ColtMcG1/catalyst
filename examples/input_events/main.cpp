@@ -8,7 +8,7 @@
  *
  * Everything it has to say goes through catalyst::logging, so the echo carries a timestamp and a category and can be
  * sent to a file or a panel by adding a sink rather than by changing any of the code below.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/events/bus.hpp>

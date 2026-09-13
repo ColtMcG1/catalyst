@@ -20,7 +20,7 @@
  *     draw_progress(cal.progress());
  *
  * Touching anything restarts the window, and `restarts()` is the cue to tell the user to let go.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

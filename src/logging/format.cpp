@@ -6,7 +6,7 @@
  * is given, so padding a level name that already carries escape bytes would push every following
  * column out of line. Appending the sequence to the output first and formatting the name into the
  * same buffer afterwards keeps the width computation looking only at the name.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/logging/format.hpp>

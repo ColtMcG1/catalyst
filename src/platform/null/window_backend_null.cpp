@@ -3,7 +3,7 @@
  * @brief The headless implementation of the Catalyst platform window backend. It keeps the same observable behaviour as a
  * real backend -- ids, per-window state, the event bus and input feed seams -- entirely in memory, so code that drives
  * windows can be built and tested on machines with no window system at all.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../detail_backend.hpp"

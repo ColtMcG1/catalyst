@@ -6,7 +6,7 @@
  * except when they are not. Rather than spread those choices across parser and writer overloads,
  * they live in one aggregate that both sides take, so a file read with a dialect writes back out
  * with the same one.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

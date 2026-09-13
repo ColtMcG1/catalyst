@@ -1,7 +1,7 @@
 # CMakeLists.txt for the Catalyst input actions example.
 # Headless: exercises the device registry, gamepad polling and the action layer with no window, so it builds and runs
 # without the platform module. Links catalyst::input and catalyst::logging, which is what it reports through.
-# License: CDDL-1.0 (see LICENSE).
+# License: MIT (see LICENSE).
 
 add_executable(catalyst_input_actions
   main.cpp

@@ -1,7 +1,7 @@
 /**
  * @file test_registry.cpp
  * @brief device_registry: handles, generations, control values, and the events it publishes.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

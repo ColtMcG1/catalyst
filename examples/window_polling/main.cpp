@@ -6,7 +6,7 @@
  * events, logging relevant information through the Catalyst logging module. It simulates a simple frame loop with a
  * sleep to mimic a 60 Hz update rate. This serves as a basic template for using the Catalyst platform library in
  * applications that require window management and event handling.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/catalyst.hpp>

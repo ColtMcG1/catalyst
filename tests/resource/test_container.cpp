@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file test_container.cpp
@@ -13,7 +13,7 @@
  * What is under test is the three things a reader of these formats gets wrong: the format table,
  * the level and layer arithmetic for block formats, and -- for KTX2 -- the transposition between a
  * level-major file and a layer-major `image`.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

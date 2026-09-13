@@ -37,7 +37,7 @@
  * runs after the event exists and its message has been formatted. Turning a whole category off
  * belongs in `router::set_category_level`, which costs nothing per call; middleware is for the
  * decisions that need to look at the event.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

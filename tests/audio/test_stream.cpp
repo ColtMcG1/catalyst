@@ -6,7 +6,7 @@
  * @details Everything here runs against the null backend and against types with no backend at all,
  * so it is deterministic and needs no audio hardware. What a *rendering* stream does is
  * test_offline.cpp's job.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

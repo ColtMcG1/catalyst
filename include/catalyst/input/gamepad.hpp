@@ -11,7 +11,7 @@
  *
  * Unlike a keyboard or a mouse, a gamepad has no window, so it is not fed by the platform layer: input::context polls it
  * from its own backend (XInput on Windows) when you call poll().
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

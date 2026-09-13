@@ -6,7 +6,7 @@
  * the sink, so it stays in the header where both sinks can instantiate it. What is here is the part
  * that is the same whichever representation is being built: string decoding, number scanning, and
  * the conversion from a scanned number to an `int64` or a `double`.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/json/parser.hpp>

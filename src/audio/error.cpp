@@ -1,7 +1,7 @@
 /**
  * @file error.cpp
  * @brief Renders an `error` as the sentence a log line wants.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/audio/error.hpp>

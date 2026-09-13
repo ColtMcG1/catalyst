@@ -13,7 +13,7 @@
  * The chain runner erases itself too. A middleware is called with the event, an opaque context, and
  * a function pointer that resumes the chain from that context - so `next` can be a small object with
  * no idea what a middleware list is, and the runner can live in router.cpp.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

@@ -17,7 +17,7 @@
  * Channels are merged in the control view: a note-on for middle C sets the same slot whichever of the sixteen channels
  * it arrived on, because a player pressing one key should actuate one control. Code that needs the channel reads
  * `midi_event::channel`.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

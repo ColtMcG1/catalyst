@@ -6,7 +6,7 @@
  * relevant information through the Catalyst logging module. It uses wait_events with an infinite timeout to block until
  * events are available, followed by pump_events to process them. This serves as a basic template for using the Catalyst
  * platform library in applications that require window management and event handling with an event-driven approach.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/catalyst.hpp>

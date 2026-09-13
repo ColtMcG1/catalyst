@@ -5,7 +5,7 @@
  * @details The writer quotes a field exactly when leaving it bare would not read back as the same
  * field, and no more often than that. Quoting everything would also be correct and would make every
  * file bigger and every diff noisier, so the round trip is pinned by tests instead of by caution.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

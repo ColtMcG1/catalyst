@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file image.hpp
@@ -40,7 +40,7 @@
  *
  * The GPU upload that turns an `image` into a `rendering::texture` remains Tier 3, in the separate
  * `catalyst_resource_gpu` target that *does* link the renderer. See docs/resource.md.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

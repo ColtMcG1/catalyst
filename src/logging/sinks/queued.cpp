@@ -9,7 +9,7 @@
  * A second lock covers delivery itself. Draining from two threads at once is a mistake, but it is a
  * mistake that would otherwise show up as corruption inside the user's sink rather than as the
  * serialisation they assumed they had.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/logging/sinks/queued.hpp>

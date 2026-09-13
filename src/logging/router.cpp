@@ -23,7 +23,7 @@
  * this thread is dispatching through, so an event logged from inside a sink is dropped instead of
  * recursing. The other is the sink this thread is currently inside, so that a sink removing itself
  * is not asked to wait for itself to finish.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/logging/router.hpp>

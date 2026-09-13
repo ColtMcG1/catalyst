@@ -16,7 +16,7 @@
  * This is the sink for a reader that wants the current state of the log. A reader that wants every
  * event exactly once, on its own thread, wants `queued_sink`: this one overwrites what a slow reader
  * has not looked at yet, and says nothing about having done so.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

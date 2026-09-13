@@ -6,7 +6,7 @@
  * a ragged table costs the same as a rectangular one. The builder is the only code that writes those
  * vectors, and it appends the two sentinels in @ref catalyst::resource::csv::detail::table_builder::finish
  * so that the last field and the last record can be measured the same way as every other.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/csv/table.hpp>

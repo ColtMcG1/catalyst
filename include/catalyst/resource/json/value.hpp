@@ -2,7 +2,7 @@
  * @file value.hpp
  * @brief The owning JSON value tree for the catalyst::resource::json module: the @ref value class and the
  * @ref array / @ref object containers it is built from, plus the @ref type tag shared with the tape DOM.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

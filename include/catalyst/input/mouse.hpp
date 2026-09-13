@@ -9,7 +9,7 @@
  * clipped to the screen, and what a UI wants. `mouse_raw_move_event` is the device: unaccelerated, unclipped, published
  * only while the window's cursor mode is captured, and what a first-person camera wants - it keeps reporting motion
  * after the cursor has been pinned against the edge of the screen, which the cursor stream by definition cannot.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

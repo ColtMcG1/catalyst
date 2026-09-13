@@ -6,7 +6,7 @@
  * @details Runs against the null backend, so no hardware and no timing is involved. What cannot be
  * tested here is a real device disappearing; the queue that carries that is the same one these
  * events travel on, and `stream::pump()` is the only thing that drains it.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

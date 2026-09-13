@@ -12,7 +12,7 @@
  * which is what an error message wants to underline. The entry points themselves are members, so
  * they are declared in reference.hpp with the rest of the class and defined alongside these in
  * parser.cpp.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

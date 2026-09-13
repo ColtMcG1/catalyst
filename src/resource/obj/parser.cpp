@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file parser.cpp
@@ -8,7 +8,7 @@
  * describing what was wrong. The line number and the asset name are the loop's business, not
  * theirs, so they are stamped on in one place in @ref parser::parse and every message reads the
  * same way.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/obj/parser.hpp>

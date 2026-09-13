@@ -1,7 +1,7 @@
 /**
  * @file test_state.cpp
  * @brief input_state and input::context: the platform feed, frame edges, deltas and focus loss.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

@@ -9,7 +9,7 @@
  * Nothing in here locks. The ring is a plain data structure; the sink around it owns the mutex,
  * because each of them needs one anyway for the condition variables and counters that are their own
  * business.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

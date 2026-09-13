@@ -4,7 +4,7 @@
  * @details The line is rendered before the lock is taken, because another sink may already have it
  * in the shared cache and, if not, the formatting is the same work whoever ends up doing it - and
  * doing it inside the lock would make every other logging thread wait for it.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/logging/sinks/file.hpp>

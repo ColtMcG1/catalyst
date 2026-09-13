@@ -4,7 +4,7 @@
  * @details This example intentionally does nothing. It exists as a ready-made target to drop
  * throwaway code into while trying something out; the focused examples alongside it show how the
  * individual modules are meant to be used.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/catalyst.hpp>

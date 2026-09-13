@@ -15,7 +15,7 @@
  *
  * Everything here is `constexpr` where it can be, header-only, and depends on nothing but the
  * standard library.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

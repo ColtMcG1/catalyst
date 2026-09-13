@@ -7,7 +7,7 @@
  * split across the module by subject -- parsing and composition in parser.cpp, resolution and
  * normalization in resolver.cpp -- and the headers that go with those carry the helpers each is
  * built from. Include uri.hpp for the whole module.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

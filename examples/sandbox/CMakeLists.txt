@@ -1,6 +1,6 @@
 # CMakeLists.txt for the Catalyst sandbox application.
 # The sandbox is an empty scratch target for experimenting with the Catalyst libraries: its main function does nothing, and it links against either the monolithic catalyst library or the individual modules, depending on how the project is configured. The focused examples alongside it demonstrate the individual modules.
-# License: CDDL-1.0 (see LICENSE).
+# License: MIT (see LICENSE).
 
 add_executable(catalyst_sandbox
   main.cpp

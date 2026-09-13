@@ -17,7 +17,7 @@
  * calls it once a frame learns about an unplugged headset within a frame, which is soon enough for
  * every use these events have; a program that never calls it learns nothing, and its queue is
  * bounded and drops the oldest rather than growing.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

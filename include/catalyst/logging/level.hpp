@@ -4,7 +4,7 @@
  * @details The names are the spelling used by every text sink and by configuration files, so the
  * conversions live here rather than in a sink. Both are `constexpr` on purpose: a category that
  * wants a compile-time default level, or a table of levels built at compile time, needs them.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

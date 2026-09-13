@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file image.cpp
@@ -9,7 +9,7 @@
  * `format_image_size_bytes`, `packed_size_bytes` -- and these are the member spellings of it, so
  * there is exactly one implementation of the rule that a level is the floor of half the one above
  * and that a compressed level rounds up to whole blocks.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/image.hpp>

@@ -12,7 +12,7 @@
  *
  * It declares `reentrant` on the strength of its own lock, but that lock is held across a write to
  * the filesystem, on the thread that logged. A frame loop wants this behind an `async_sink`.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

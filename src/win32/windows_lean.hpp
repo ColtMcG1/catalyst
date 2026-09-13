@@ -18,7 +18,7 @@
  * macros, which otherwise break every spelled-out std::min/std::max.
  *
  * On non-Windows targets this header is empty, so it can be included unconditionally.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

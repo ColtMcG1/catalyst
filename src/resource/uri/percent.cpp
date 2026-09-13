@@ -1,7 +1,7 @@
 /**
  * @file percent.cpp
  * @brief Implements the percent-encoding helpers declared in percent.hpp.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/uri/percent.hpp>

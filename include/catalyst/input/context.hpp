@@ -20,7 +20,7 @@
  *
  * Threading: not synchronised. Drive it from one thread. Listeners run on whichever thread publishes, which is that
  * one.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

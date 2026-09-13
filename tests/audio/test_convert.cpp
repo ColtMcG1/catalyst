@@ -7,7 +7,7 @@
  * answer; a GUID parser that quietly rejects a well-formed CLSID makes every installed ASIO driver
  * disappear from enumeration. Both are now reached by more than one backend, so both are asserted
  * here rather than left to be noticed on hardware.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

@@ -17,7 +17,7 @@
  *     in.poll();                 // gamepads, HID, MIDI -> registry -> bus -> here
  *
  * Threading: not synchronised. Its listeners run on whichever thread publishes, so publish and read from one thread.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

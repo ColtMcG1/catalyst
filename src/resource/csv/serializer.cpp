@@ -5,7 +5,7 @@
  * @details Quoting is decided per field by @ref catalyst::resource::csv::needs_quoting rather than
  * applied to everything, because a file that quotes only what it must is the one a human opening it
  * in a spreadsheet expects to see, and it round-trips identically either way.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/csv/serializer.hpp>

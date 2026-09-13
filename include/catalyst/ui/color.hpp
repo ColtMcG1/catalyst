@@ -4,7 +4,7 @@
  * @details Colors are stored as four floats in the range [0, 1] because that is the form blending,
  * opacity and interpolation need. Packing to the eight-bit-per-channel form a vertex buffer wants is
  * an explicit step, so the lossy conversion only happens where it is intended.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

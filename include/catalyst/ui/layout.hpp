@@ -4,7 +4,7 @@
  * @details Layout is a single free function over a `tree`. It resolves every measurement in the
  * subtree against a context, runs a single-line flexbox pass over each container, positions
  * absolutely positioned children against their parent, and writes a `layout_result` onto every node.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

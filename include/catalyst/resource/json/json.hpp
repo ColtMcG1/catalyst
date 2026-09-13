@@ -5,7 +5,7 @@
  * @ref document with its @ref cursor, the parser entry points @ref parse and @ref parse_document, and the
  * @ref dump serializers. Individual headers can be included instead when only part of the module is
  * needed.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

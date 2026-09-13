@@ -9,7 +9,7 @@
  * @ref backend_kind::automatic is a request, not a backend. It resolves at open time to whatever
  * @ref default_backend returns, and never to @ref backend_kind::offline - a stream with no clock of
  * its own is never what a caller who did not name it meant.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

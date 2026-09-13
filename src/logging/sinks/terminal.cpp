@@ -10,7 +10,7 @@
  *
  * The answers are cached in function-local statics: the environment is read once, and the Windows
  * console mode is changed once, however many sinks ask.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 // The MSVC CRT deprecates getenv in favour of _dupenv_s, on the grounds that the pointer it returns

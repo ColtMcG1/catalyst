@@ -18,7 +18,7 @@
  * Within a map, a chord suppresses the plain binding it contains. Bind "S" to `move_back` and "Ctrl+S" to `quicksave`
  * and holding Ctrl+S saves without also walking backwards, which is what the player meant and what they would
  * otherwise have to work around.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

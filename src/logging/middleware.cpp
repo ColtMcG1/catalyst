@@ -3,7 +3,7 @@
  * @brief Implements `scoped_middleware`. The chain itself is run in router.cpp.
  * @details The counterpart of sink.cpp, and here for the same reason: the guard needs the router's
  * definition, which middleware.hpp does not have and should not need.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/logging/middleware.hpp>

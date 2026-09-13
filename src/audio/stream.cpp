@@ -5,7 +5,7 @@
  * @details All device and format specifics live in the backends. This layer decides which backend
  * to build, enforces the small state machine that is left once "initialized" stopped being a state,
  * and owns the hand-off from the platform's notification thread to the caller's.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "detail_backend.hpp"

@@ -5,7 +5,7 @@
  * @details A field's conversions are all `std::from_chars` over the field's own bytes, which is why
  * they are exact and why they refuse trailing junk: the whole field must be the number, because a
  * cell that reads `12kg` is a mistake in the file rather than the number twelve.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/csv/tape.hpp>

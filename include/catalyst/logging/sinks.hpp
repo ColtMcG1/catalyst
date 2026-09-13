@@ -17,7 +17,7 @@
  * The first four write on the thread that logged. The last two exist because that is often the
  * wrong thread: `async_sink` when the writing is merely slow, `queued_sink` when it has to happen
  * somewhere particular.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

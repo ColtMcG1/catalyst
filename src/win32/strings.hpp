@@ -19,7 +19,7 @@
  * having to guard against null first. They are preferred over the view overloads by overload
  * resolution for array and pointer arguments, since array-to-pointer decay is a standard
  * conversion where forming a view is a user-defined one.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

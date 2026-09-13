@@ -3,7 +3,7 @@
  * @brief Error types for the catalyst::resource::csv module: the @ref parse_error value that
  * @ref parse_table returns through `std::expected`, and the @ref type_error exception thrown when a
  * field is read as a type it does not hold.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

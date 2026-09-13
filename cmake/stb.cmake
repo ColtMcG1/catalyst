@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: CDDL-1.0
+# SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026-Current Catalyst
 #
 # stb_image, fetched at a pinned commit and exposed as the INTERFACE target `catalyst_stb`.
@@ -13,7 +13,7 @@
 # deliberate edit to the SHA below.
 #
 # License: stb is dual-licensed public domain (Unlicense) / MIT -- see the LICENSE file in the
-# fetched source tree. Catalyst itself remains CDDL-1.0.
+# fetched source tree. Catalyst itself remains MIT.
 
 include_guard(GLOBAL)
 

@@ -2,7 +2,7 @@
  * @file table.hpp
  * @brief The owning @ref table that holds a parsed CSV file in tape form, and the builder the parser
  * fills it through.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

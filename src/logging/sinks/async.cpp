@@ -9,7 +9,7 @@
  * The accounting is three counters that always satisfy `processed_ + queue_.size() == enqueued_`. An
  * event discarded to make room counts as processed, because nothing is ever going to write it, and a
  * `flush()` waiting for everything queued before it would otherwise wait forever.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/logging/sinks/async.hpp>

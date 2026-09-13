@@ -5,7 +5,7 @@
  * device enumeration, the real-time block and renderer, both stream types, and the events. A
  * program that only needs part of it can include that part instead - code that just renders wants
  * block.hpp, a device picker wants device.hpp, and a test wants offline.hpp.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

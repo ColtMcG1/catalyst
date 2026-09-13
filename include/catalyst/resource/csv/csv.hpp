@@ -5,7 +5,7 @@
  * flavour, the owning @ref table with its @ref row and @ref field handles, the @ref parse_table entry
  * point, and the @ref writer and @ref dump serializers. Individual headers can be included instead
  * when only part of the module is needed.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

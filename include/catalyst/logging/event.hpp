@@ -8,7 +8,7 @@
  * `payload` is for producers whose findings are more than text: a validation pass can attach its
  * diagnostic so a sink built for that pass gets the structured result back out, while a console
  * sink just prints the message. It is empty for ordinary log calls.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

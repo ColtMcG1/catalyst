@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file parser.hpp
@@ -18,7 +18,7 @@
  * it cannot read rather than guessing, and reports @ref error_code::decode_failed with the line
  * number and the offending token in @ref error::detail -- a malformed OBJ is nearly always an
  * exporter bug or a truncated download, and both are things someone has to go and look at.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

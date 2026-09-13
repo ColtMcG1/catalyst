@@ -1,7 +1,7 @@
 /**
  * @file log.cpp
  * @brief Implements the parts of the logging entry points that are not templates.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/logging/log.hpp>

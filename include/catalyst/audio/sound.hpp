@@ -11,7 +11,7 @@
  *
  * Decoders arrive in a later part of Tier 2 and will produce exactly this type, so nothing that
  * consumes a `sound_buffer` today has to change when a WAV file becomes a way to get one.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

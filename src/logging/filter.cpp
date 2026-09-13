@@ -1,7 +1,7 @@
 /**
  * @file filter.cpp
  * @brief Implements the stock event filters declared in filter.hpp.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/logging/filter.hpp>

@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file obj.hpp
@@ -18,7 +18,7 @@
  * hands back a `std::span` over a run of @ref obj::face_vertices, and triangulating is the caller's
  * choice -- a fan is right for the convex polygons exporters emit, and nothing here has thrown away
  * the information needed to do better.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

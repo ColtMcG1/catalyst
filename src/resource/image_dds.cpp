@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file image_dds.cpp
@@ -20,7 +20,7 @@
  * is undefined, `rendering::format` has no X-channel spelling to carry that meaning, and a reader
  * that quietly handed those bytes over as alpha would produce an arbitrarily transparent texture
  * with nothing in the log. Re-cooking the file is the fix, and the failure message says so.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "detail/image_codec.hpp"

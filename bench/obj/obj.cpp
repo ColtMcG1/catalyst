@@ -22,7 +22,7 @@
  * distribution is bounded below by the real cost and has a long tail of interference, so the
  * minimum is the stable statistic; the spread is printed alongside so a run whose tail swamped the
  * signal is visible rather than silently reported as a result.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/obj/obj.hpp>

@@ -4,7 +4,7 @@
  * @details Each of these constructs a backend, asks it, and throws it away. That is cheap for every
  * backend the module has - enumeration opens no device and starts no thread - and it is what lets a
  * device picker exist before the program has decided what to play.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "detail_backend.hpp"

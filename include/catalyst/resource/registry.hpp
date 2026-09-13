@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file registry.hpp
@@ -31,7 +31,7 @@
  * the registry. Loading happens off-thread through @ref vfs::read_async; the resulting object is
  * handed to `insert` on the owning thread. Locking every `get` to allow otherwise would cost the
  * hot path -- resolving a handle -- for a benefit only the loader needs.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

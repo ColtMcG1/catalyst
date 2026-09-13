@@ -4,7 +4,7 @@
  * @details It lives here rather than in router.cpp because the guard is part of what a sink is -
  * the answer to "this sink is going away, stop logging to it" - and because it needs the router's
  * definition, which sink.hpp deliberately does not have.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/logging/sink.hpp>

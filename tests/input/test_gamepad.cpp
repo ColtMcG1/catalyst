@@ -1,7 +1,7 @@
 /**
  * @file test_gamepad.cpp
  * @brief Gamepad vocabulary, the dead-zone maths, and the calibrator.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

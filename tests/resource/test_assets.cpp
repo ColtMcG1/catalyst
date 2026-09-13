@@ -1,11 +1,11 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file test_assets.cpp
  * @brief Tier 1 of the asset system: blobs, sources, the mount table, and the registry's
  * generation-checked handles.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

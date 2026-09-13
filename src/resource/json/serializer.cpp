@@ -6,7 +6,7 @@
  * the node type so that one writer walks both a `value` tree and a `cursor` over a tape, and it
  * stays in the header. What is here is everything that only ever sees bytes: indentation, the two
  * number formats, and the escaping a JSON string needs.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/json/serializer.hpp>

@@ -14,7 +14,7 @@
  *
  * The interface is abstract so `catalyst::platform` links against this header alone rather than the whole module, and
  * so a test can drive the platform side with a recording stub.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

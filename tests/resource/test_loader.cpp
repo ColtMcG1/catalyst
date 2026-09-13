@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file test_loader.cpp
@@ -13,7 +13,7 @@
  * The bytes come from `make_memory_source`, so nothing here touches a disk, and the one image used
  * is a DDS -- read by this module's own code -- so the suite runs in a `CATALYST_RESOURCE_STB=OFF`
  * build like the rest of the container work.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

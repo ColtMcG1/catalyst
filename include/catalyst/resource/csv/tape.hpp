@@ -2,7 +2,7 @@
  * @file tape.hpp
  * @brief The flat "tape" encoding of a parsed CSV table and the non-owning @ref field and @ref row
  * handles that navigate it.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

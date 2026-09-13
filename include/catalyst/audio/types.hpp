@@ -22,7 +22,7 @@
  * **Channels are a layout, not just a number.** A count says how much memory a block needs; a
  * layout says which speaker each channel is. Tier 1 only ever needs the count, but the count alone
  * cannot survive into a mixer, so the layout is defined here rather than retrofitted later.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

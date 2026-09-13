@@ -17,7 +17,7 @@
  * a notification touches cannot be the backend's own. It is held by `shared_ptr` on both sides
  * instead: teardown retires it and drops its reference, and whatever is still in flight keeps it
  * alive for exactly as long as it needs.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

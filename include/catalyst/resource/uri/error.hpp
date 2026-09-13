@@ -5,7 +5,7 @@
  * @details Malformed input is an ordinary outcome for text that came from a manifest or a user, so
  * the whole module reports it as a value through `std::expected` rather than throwing, the same
  * shape the JSON and CSV parsers use.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

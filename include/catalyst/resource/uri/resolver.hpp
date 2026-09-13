@@ -8,7 +8,7 @@
  * which is `normalized`. Both end by recomposing through @ref catalyst::resource::uri::from_parts,
  * so neither can produce a `uri` whose own text would not reparse. Both are members, so they are
  * declared in reference.hpp with the rest of the class and defined alongside these in resolver.cpp.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

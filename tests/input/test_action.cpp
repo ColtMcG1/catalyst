@@ -1,7 +1,7 @@
 /**
  * @file test_action.cpp
  * @brief The action layer: binding shapes, composites, processors, interactions, phases and contexts.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

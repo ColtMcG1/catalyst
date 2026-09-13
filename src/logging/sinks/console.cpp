@@ -5,7 +5,7 @@
  * palette accordingly and writes the line. The write goes through an `osyncstream` so that two
  * threads logging at once produce two lines rather than one interleaved mess, which is what lets
  * the sink declare `reentrant` while holding no lock of its own.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/logging/sinks/console.hpp>

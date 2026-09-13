@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file loader.hpp
@@ -36,7 +36,7 @@
  * the counting and the caching for free. Cycle detection for a declared dependency graph is not
  * here; a loader that recurses into itself will recurse forever, and the graph that would prevent
  * it is deferred with the rest of the dependency work. See docs/resource.md.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

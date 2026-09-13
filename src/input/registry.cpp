@@ -1,7 +1,7 @@
 /**
  * @file registry.cpp
  * @brief Implementation of device_registry.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/input/registry.hpp>

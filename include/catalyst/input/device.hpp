@@ -18,7 +18,7 @@
  *
  * `device_id` is an index plus a generation, so a handle kept across a disconnect is detected rather
  * than silently aliasing whatever took the slot next.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

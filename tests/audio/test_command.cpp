@@ -12,7 +12,7 @@
  * What no test here can prove is the absence of a race - a passing run under a strong memory model
  * says less than it looks like. What it does catch is every way of getting the arithmetic and the
  * ownership wrong, which is where the bugs in a queue like this actually live.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

@@ -4,7 +4,7 @@
  * @details Including this header pulls in the whole UI module: the CSS-like measurement types, the
  * geometry and color primitives, the style properties, the retained node tree and the layout engine.
  * Individual headers can be included instead when only part of the module is needed.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

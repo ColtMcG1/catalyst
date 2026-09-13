@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file test_mips.cpp
@@ -11,7 +11,7 @@
  * `mip_options::srgb_aware` written as an assertion.
  *
  * No decoder is needed for any of this, so the suite runs in a `CATALYST_RESOURCE_STB=OFF` build.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

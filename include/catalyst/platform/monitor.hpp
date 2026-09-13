@@ -2,7 +2,7 @@
  * @file monitor.hpp
  * @brief Monitor management and event handling for the Catalyst platform library.
  * @details This header defines types and functions related to monitor management and event handling in the Catalyst platform library. It includes definitions for monitor descriptors, monitor events, and functions for retrieving monitor information. The monitor management system allows developers to query connected monitors, their properties, and handle events related to monitor changes (e.g. when a monitor is connected or disconnected). By using the functionality provided in this header, developers can create applications that are responsive to changes in the display environment and can adapt to different monitor configurations effectively.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

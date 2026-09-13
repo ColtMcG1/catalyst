@@ -5,7 +5,7 @@
  * on statistical properties: block segmentation, stream-position continuity across blocks,
  * interleaving, capture limits, the duplex input feed and the WAV writer are all verified
  * sample-for-sample.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

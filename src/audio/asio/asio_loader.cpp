@@ -2,7 +2,7 @@
  * @file asio_loader.cpp
  * @brief Registry enumeration of installed ASIO drivers, and the DLL-and-class-factory dance that
  * reaches one without the COM runtime.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "asio_loader.h"

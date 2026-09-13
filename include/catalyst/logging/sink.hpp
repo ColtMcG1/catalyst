@@ -42,7 +42,7 @@
  * This header is the contract and nothing else, so a type declaring one does not drag in an
  * `<fstream>` or an `<iostream>` it has no use for. The sinks that come with the module are in
  * sinks/, one to a file, and sinks.hpp includes all of them.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

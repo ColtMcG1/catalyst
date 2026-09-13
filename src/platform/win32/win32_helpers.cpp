@@ -1,7 +1,7 @@
 /**
  * @file win32_helpers.cpp
  * @brief DPI awareness and effective-DPI queries for the Win32 platform backend.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "win32_helpers.hpp"

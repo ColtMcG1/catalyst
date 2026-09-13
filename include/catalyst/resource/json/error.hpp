@@ -2,7 +2,7 @@
  * @file error.hpp
  * @brief Error types for the catalyst::resource::json module: the @ref parse_error value that the parsers return
  * through `std::expected`, and the @ref type_error exception thrown when a value is accessed as the wrong type.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

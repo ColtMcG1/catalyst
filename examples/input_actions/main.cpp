@@ -15,7 +15,7 @@
  *
  * Everything it reports goes through catalyst::logging, so the readout carries a level and a category and can be sent
  * somewhere else by adding a sink rather than by changing any of the code below.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/events/bus.hpp>

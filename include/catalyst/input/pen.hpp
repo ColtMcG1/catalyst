@@ -9,7 +9,7 @@
  * Pressure and the tilt angles are normalised, so a program written against one tablet works on another. Tilt is
  * reported as a pair in [-1, 1] rather than in degrees for the same reason a stick is: it is what a binding wants, and
  * `pen_tilt_degrees()` is there for the cases that genuinely need the angle.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

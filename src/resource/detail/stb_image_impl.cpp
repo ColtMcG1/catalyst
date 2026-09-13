@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file stb_image_impl.cpp
@@ -22,7 +22,7 @@
  *
  * Warnings are disabled for this file in src/resource/CMakeLists.txt rather than by patching
  * upstream: the code is vendored verbatim at a pinned commit and should stay diff-free.
- * License: CDDL-1.0 (see LICENSE). stb itself is public domain / MIT -- see the LICENSE file in the
+ * License: MIT (see LICENSE). stb itself is public domain / MIT -- see the LICENSE file in the
  * fetched stb source tree.
  */
 

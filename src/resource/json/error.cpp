@@ -1,7 +1,7 @@
 /**
  * @file error.cpp
  * @brief Renders a @ref catalyst::resource::json::parse_error as the sentence an error message wants.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/json/error.hpp>

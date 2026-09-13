@@ -11,7 +11,7 @@
  *
  * The last case does start a second thread, because the arrangement the type is built for - a game
  * thread posting while a render thread renders - is not exercised by anything above it.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../test_common.hpp"

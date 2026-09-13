@@ -1,7 +1,7 @@
 # CMakeLists.txt for the Catalyst rendering_basics example.
 # Opens a window, creates a rendering device and swapchain for it, and records/submits a clearing render pass each
 # frame. Demonstrates the intended per-frame flow of the rendering API together with the platform module.
-# License: CDDL-1.0 (see LICENSE).
+# License: MIT (see LICENSE).
 
 add_executable(catalyst_rendering_basics
   main.cpp

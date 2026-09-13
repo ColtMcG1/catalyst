@@ -10,7 +10,7 @@
  * is a template parameter, the parser resolves one function pointer per parse -- a SWAR scan for the
  * delimiters that actually occur in the wild, a scalar loop for anything else. The choice is made
  * once, outside the loop, so the pointer is predictable and the loop stays tight.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

@@ -2,7 +2,7 @@
  * @file window.hpp
  * @brief Window management and event handling for the Catalyst platform library.
  * @details This header defines the window class and related functions for creating and managing windows, as well as handling events such as input and window messages. It provides a platform-agnostic interface for working with windows, allowing applications to create windows, retrieve native handles, and process events in a consistent manner across different operating systems. The event system includes various types of events such as window resizing, key presses, mouse movement, and more, enabling developers to build interactive applications with ease.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

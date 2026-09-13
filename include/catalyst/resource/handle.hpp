@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file handle.hpp
@@ -24,7 +24,7 @@
  *
  * Generations start at 1, so slot 0 is a usable slot and the all-zero id remains the "no asset"
  * value that `operator bool` tests for.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

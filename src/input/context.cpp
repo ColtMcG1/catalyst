@@ -1,7 +1,7 @@
 /**
  * @file context.cpp
  * @brief Implementation of input::context - the frame, the backends, and the platform feed.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/input/context.hpp>

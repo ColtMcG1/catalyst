@@ -21,7 +21,7 @@
  * and at a fixed address for as long as the stream does. That was already true of the old
  * `void *user` state pointer; the difference is that it is now the type saying so, and that
  * binding a temporary is a compile error rather than a dangling pointer discovered at 48 kHz.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

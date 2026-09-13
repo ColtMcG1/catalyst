@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file image_mips.cpp
@@ -24,7 +24,7 @@
  *
  * Neither is a matter of taste, and neither is something a caller can correct afterwards, which is
  * why they are here rather than left to one.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/image.hpp>

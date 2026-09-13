@@ -13,7 +13,7 @@
  *
  * Threading: not synchronised. Write from one thread - the one that pumps the platform's messages and calls poll().
  * Reads from other threads need external synchronisation, and a snapshot is usually the better answer anyway.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

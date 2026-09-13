@@ -20,7 +20,7 @@
  *   - **A platform notification thread** observes devices appearing and disappearing. It only ever
  *     pushes onto an internal queue; @ref pump drains it onto the caller's bus, on the caller's
  *     thread. See events.hpp.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

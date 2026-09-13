@@ -20,7 +20,7 @@
  * components like shcore.dll; the handle is intentionally never released, because the resolved
  * function pointers outlive any scope that could own it and unmapping the module would leave them
  * dangling. One extra module reference for the life of the process is the correct trade.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

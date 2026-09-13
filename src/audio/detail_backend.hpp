@@ -6,7 +6,7 @@
  * macros; the null backend is always compiled so the module builds and links on every platform.
  * The offline renderer is deliberately *not* a backend - it owns no device and no thread, so it is
  * implemented directly in offline.cpp rather than pretending to be hardware.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

@@ -19,7 +19,7 @@
  * same sink registered twice can answer to two different audiences, and a filter that lives in the
  * entry costs the sink type nothing and the router one null check.
  *
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

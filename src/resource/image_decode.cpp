@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file image_decode.cpp
@@ -13,7 +13,7 @@
  *
  * The readers themselves are in image_stb.cpp, image_ktx2.cpp and image_dds.cpp. Only the first is
  * touched by `CATALYST_RESOURCE_STB`; see detail/image_codec.hpp.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/image.hpp>

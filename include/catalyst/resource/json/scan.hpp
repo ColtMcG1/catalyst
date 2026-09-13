@@ -5,7 +5,7 @@
  * specific to JSON and lives in `<catalyst/text/scan.hpp>`. What is specific to JSON is *which* bytes
  * end a string run: the closing quote, an escape, or an unescaped control byte. That is the same set
  * the serializer has to escape, so both directions share these names.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

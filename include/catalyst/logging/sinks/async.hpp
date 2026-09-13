@@ -24,7 +24,7 @@
  * `overflow_policy::block` waits for room, and `flush()` waits for the worker to catch up - which
  * the router does on its own account at the flush level. `async_options::flush_timeout` puts a
  * ceiling on the second.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

@@ -2,7 +2,7 @@
  * @file utils.hpp
  * @brief Main header for Catalyst Utils library, including all utility components.
  * @details This header serves as the primary include for the Catalyst Utils library, which provides a collection of utility functions and types commonly used in game development and real-time applications. By including this single header, users can access all the functionality provided by the Catalyst Utils library without needing to include individual component headers. The library is designed to be efficient, easy to use, and compatible with modern C++ standards.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

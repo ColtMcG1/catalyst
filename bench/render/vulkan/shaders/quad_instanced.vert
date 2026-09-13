@@ -1,6 +1,6 @@
 // Vertex stage of the instanced quad benchmark: a unit quad in binding 0 expanded by per-instance placement and colour
 // in binding 1, so N quads cost one draw_indexed call.
-// License: CDDL-1.0 (see LICENSE).
+// License: MIT (see LICENSE).
 #version 450
 
 layout(location = 0) in vec2 in_corner;    // Unit quad corner, [0, 1] x [0, 1].

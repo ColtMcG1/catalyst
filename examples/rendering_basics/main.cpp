@@ -8,7 +8,7 @@
  * the triangle, submits the command list and presents. Backends that do not consume SPIR-V skip the pipeline and only
  * clear. If the swapchain reports it is out of date (window resized or minimised) it is recreated at the current
  * client size.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "shaders.hpp"

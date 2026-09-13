@@ -11,7 +11,7 @@
  * the render dispatcher come from `backend_base`; sample conversion is the module's shared table in
  * `detail_convert.hpp`, which is also what WASAPI now uses; COM apartment and interface ownership
  * are the shared `win32::com_apartment` and `win32::com_ptr`.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../detail_backend.hpp"

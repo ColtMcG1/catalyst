@@ -3,7 +3,7 @@
  * @brief The catalyst::resource::json parser: a recursive-descent RFC 8259 parser written once against a sink
  * interface, the two sinks that build a @ref value tree or a @ref document, and the @ref parse /
  * @ref parse_document entry points that report malformed input through `std::expected`.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

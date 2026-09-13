@@ -1,7 +1,7 @@
 /**
  * @file document.hpp
  * @brief The owning @ref document that holds a parsed JSON tree in tape form, and the parser sink that fills it.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

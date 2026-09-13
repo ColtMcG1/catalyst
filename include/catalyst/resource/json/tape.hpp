@@ -1,7 +1,7 @@
 /**
  * @file tape.hpp
  * @brief The flat "tape" encoding of a parsed JSON document and the non-owning @ref cursor that navigates it.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

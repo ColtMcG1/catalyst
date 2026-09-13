@@ -33,7 +33,7 @@
  * buffers coming back the other - and it lives in `catalyst::audio` because audio is what needs it
  * today. Nothing about it is audio-specific; if a second module ever wants it, it moves to
  * `catalyst::utils` unchanged.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

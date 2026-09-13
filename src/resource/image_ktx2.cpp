@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file image_ktx2.cpp
@@ -20,7 +20,7 @@
  * chose to identify formats by Vulkan's enumerators, which is a fact about the file format and
  * stays true in a build with no Vulkan in it -- `catalyst_resource` links no renderer and includes
  * no Vulkan header, and this table is why it does not need to.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "detail/image_codec.hpp"

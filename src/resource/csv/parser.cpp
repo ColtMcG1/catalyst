@@ -4,7 +4,7 @@
  * @details The inner loop is one call to the scan function the dialect selected, then one append.
  * Which scan that is gets decided once, in the constructor, so the indirect call is perfectly
  * predicted and the per-byte work is the scan itself.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/csv/parser.hpp>

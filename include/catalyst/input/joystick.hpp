@@ -16,7 +16,7 @@
  * Slots a given device does not have simply stay at rest. The unused floats cost a few hundred bytes per device, which
  * is a good trade for never having to ask the layout a question before you can write a binding. What the descriptor
  * *does* decide is the `control_info::name` - so a bindings screen shows "Throttle", not "Axis 5".
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

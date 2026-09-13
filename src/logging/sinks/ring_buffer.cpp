@@ -3,7 +3,7 @@
  * @brief Implements `ring_buffer_sink`.
  * @details The events sit in a fixed vector in insertion order, and every read walks it from the
  * oldest entry, which is why `collect_locked` is the only place the wrap-around is spelled out.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/logging/sinks/ring_buffer.hpp>

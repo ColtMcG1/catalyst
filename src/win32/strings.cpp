@@ -1,7 +1,7 @@
 /**
  * @file strings.cpp
  * @brief UTF-8 / UTF-16 conversion for the Win32 backends.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "strings.hpp"

@@ -1,6 +1,6 @@
 // Vertex stage of the batched / per-draw quad benchmarks: passes a clip-space vertex through, transformed by the
 // push-constant rect so one 6-vertex quad can be re-drawn at N different places without touching a buffer.
-// License: CDDL-1.0 (see LICENSE).
+// License: MIT (see LICENSE).
 #version 450
 
 layout(location = 0) in vec2 in_position;

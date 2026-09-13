@@ -56,7 +56,7 @@
  * cannot wait for itself. Removing a *different* sink from in there does wait for it, with the one
  * consequence worth naming: two sinks that each remove the other, from inside their own `write`, at
  * the same time, will wait for each other. Nothing else in here can deadlock on a sink.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

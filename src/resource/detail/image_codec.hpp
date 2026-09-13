@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file detail/image_codec.hpp
@@ -12,7 +12,7 @@
  * includes stb_image.h and the only one a `CATALYST_RESOURCE_STB=OFF` build neutralises, and the
  * two container readers are pure rearrangement with no codec behind them -- so they stay in the
  * build regardless, and a headless tool that reads cooked KTX2 needs no third-party code at all.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

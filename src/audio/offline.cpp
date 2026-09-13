@@ -5,7 +5,7 @@
  * stream advances only when `render()` is called. Written directly against the public surface
  * rather than behind the backend interface, because it has no device to abstract - which is also
  * why the type stopped being a backend when the surface was rewritten.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "detail_render.hpp"

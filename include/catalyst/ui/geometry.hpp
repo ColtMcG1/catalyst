@@ -7,7 +7,7 @@
  * and `corners` (a value per box corner, used for border radii). The latter two are templates so the
  * same shape can carry unresolved `length` measurements in a style and resolved pixel floats in a
  * layout result.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

@@ -3,7 +3,7 @@
  * @brief The Win32 implementation of the Catalyst platform window backend: window creation and state, translation of
  * window messages into Catalyst events, cursor modes and raw mouse input, per-monitor DPI, and the frame callback that
  * keeps a window rendering while the operating system owns the message pump.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../detail_backend.hpp"

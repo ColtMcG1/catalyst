@@ -1,7 +1,7 @@
 /**
  * @file binding.cpp
  * @brief Processor maths and the binding builders.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/input/binding.hpp>

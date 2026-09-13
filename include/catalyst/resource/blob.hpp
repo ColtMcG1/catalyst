@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file blob.hpp
@@ -15,7 +15,7 @@
  * copy, which for a 200 MB texture pack is the whole cost of loading it. The deleter is a plain
  * function pointer and a `void *` rather than a `std::function` so the type stays trivially movable
  * and costs nothing to pass around.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

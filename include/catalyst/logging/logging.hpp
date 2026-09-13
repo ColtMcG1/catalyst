@@ -6,7 +6,7 @@
  * Individual headers can be included instead when only part of the module is needed - code that
  * only logs wants log.hpp, a sink of its own wants sink.hpp, and the place that decides where the
  * log goes wants sinks.hpp.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file image_stb.cpp
@@ -14,7 +14,7 @@
  * (no codec recognised the header) from @ref error_code::decode_failed (one did, and then the
  * pixels were bad) -- the distinction load_image documents, and one a bare `stbi_load` call cannot
  * make because it answers null to both.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "detail/image_codec.hpp"

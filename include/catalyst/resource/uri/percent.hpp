@@ -6,7 +6,7 @@
  * public rather than an implementation detail: composing a URI from strings means encoding each
  * piece with the @ref catalyst::resource::uri::encode_set for the place it is going, and reading one
  * back means decoding it.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

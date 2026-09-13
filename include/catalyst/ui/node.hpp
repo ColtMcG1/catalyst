@@ -6,7 +6,7 @@
  * every node. Nodes are referred to by value through a `node` handle carrying an index and a
  * generation, so a handle to a destroyed node is detected rather than silently aliasing whatever
  * was created in its place.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

@@ -7,7 +7,7 @@
  *
  * Gamepads are implemented. Generic HID, MIDI and the rest are declared and return "nothing here" from both backends,
  * which is Tier 4 of docs/input.md: the device model above them is complete, so filling one in is local to one file.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

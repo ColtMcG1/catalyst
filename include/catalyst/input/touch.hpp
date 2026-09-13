@@ -8,7 +8,7 @@
  * The `id` on an event is the platform's tracking id and is what identifies *a finger over time*; the `index` is which
  * slot the module assigned it, and is what identifies it in the control model. Slots are recycled once a contact ends,
  * ids are not, so gesture code should follow `id` and only ever read control values by `index`.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

@@ -15,7 +15,7 @@
  * independent clocks, so a correct implementation needs an asynchronous ring buffer and drift
  * compensation. Rather than ship a version that glitches, this backend reports
  * `error_code::unsupported_operation` for `stream_direction::duplex`.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../detail_backend.hpp"

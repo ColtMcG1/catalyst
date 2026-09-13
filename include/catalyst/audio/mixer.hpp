@@ -52,7 +52,7 @@
  * runs at is played back with a linearly interpolated read position, which is correct in pitch and
  * cheap, and audibly imperfect on large ratios. The Tier 4 resampler replaces the read, not the
  * rest of the voice.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

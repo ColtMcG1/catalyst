@@ -12,7 +12,7 @@
  * no way to write "the default device, whatever it is" except by leaving the field empty and
  * knowing that means default. A selector says which question is being asked, and @ref
  * device_selector::by_id is the one to build a settings file on.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

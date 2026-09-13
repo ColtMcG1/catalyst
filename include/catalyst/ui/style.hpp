@@ -5,7 +5,7 @@
  * unresolved `length` measurements so that a style can be authored once in relative units and
  * resolved differently per DPI, font size or viewport. Layout reads the box and flex properties;
  * the painting tier reads the visual properties.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

@@ -11,7 +11,7 @@
  * only answers yes for a standard stream attached to a terminal. Anything else - a pipe, a file, a
  * captured `ostringstream` - gets plain text, because escape sequences written where nothing renders
  * them are litter in the output rather than colour.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

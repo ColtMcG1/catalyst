@@ -1,7 +1,7 @@
 /**
  * @file callback.cpp
  * @brief Implements `callback_sink`.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/logging/sinks/callback.hpp>

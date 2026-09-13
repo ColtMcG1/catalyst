@@ -6,7 +6,7 @@
  * tag and throw, and the lookups that scan a container. The navigation members stay in the header
  * because a traversal calls them once per node -- see the note on
  * @ref catalyst::resource::json::cursor.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/json/tape.hpp>

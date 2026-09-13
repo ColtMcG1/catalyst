@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file main.cpp
@@ -14,7 +14,7 @@
  *                 frame, or one draw call each.
  * Run with `--help` for the options; `--offscreen` takes the presentation engine out of the picture and `--serialize`
  * turns the per-frame samples from CPU pacing into GPU cost.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "render_bench.hpp"

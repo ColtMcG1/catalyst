@@ -4,7 +4,7 @@
  * @details A UI layer or a debug overlay usually wants the events and nothing else; this saves it from including the
  * registry, the action layer and the system to get at them. The connect/disconnect events and the generic
  * `control_changed_event` live in device.hpp, which this pulls in with the rest.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

@@ -1,7 +1,7 @@
 /**
  * @file detail_backend.hpp
  * @brief Internal header for platform-specific backend implementations. This header declares the interface for the platform-specific implementations of window management and event handling. The actual implementations will be defined in separate source files corresponding to each supported platform (e.g. win32, x11, etc.). This header should not be included directly by users of the Catalyst Platform library; instead, users should include the main platform.hpp header, which provides a stable API for interacting with the platform functionalities.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

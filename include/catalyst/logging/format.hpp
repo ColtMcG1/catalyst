@@ -4,7 +4,7 @@
  * @details Every text sink shares this: `line_format` says which columns are printed in front of the
  * message, and `format_line` builds the line. Sinks that write somewhere structured - a ring buffer,
  * a GUI panel - keep the event itself and never come here.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

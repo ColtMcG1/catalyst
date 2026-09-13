@@ -9,7 +9,7 @@
  *
  * Anything that is going to be around for the life of the program, and called on every event, is
  * better off as a real sink type: it can then declare `reentrant` honestly and say what it touches.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

@@ -1,7 +1,7 @@
 /**
  * @file logging.cpp
  * @brief Module identity for catalyst::logging.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/logging/logging.hpp>

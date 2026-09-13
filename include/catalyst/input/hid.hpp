@@ -2,7 +2,7 @@
  * @file hid.hpp
  * @brief Defines the USB HID usage type and related functions for the Catalyst Input module. This file provides a way to represent USB HID usages in a compact form, allowing for easy handling of USB input devices such as keyboards, mice, and gamepads. The usb_hid type is a 32-bit unsigned integer that encodes both the usage page and usage ID, making it simple to work with USB HID usages in a consistent manner across different platforms and input systems.
  * @details The usb_hid type is designed to represent USB HID usages in a compact and efficient way. It combines the usage page (a 16-bit value) and usage ID (another 16-bit value) into a single 32-bit unsigned integer. This allows for easy storage and comparison of USB HID usages without needing to manage separate values for the page and ID. The make_usb_hid function provides a convenient way to create a usb_hid value from a given usage page and ID, while the usb_hid_page and usb_hid_id functions allow you to extract the page and ID from an existing usb_hid value. By using these types and functions, developers can easily work with USB HID usages in their applications, enabling support for a wide range of USB input devices.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

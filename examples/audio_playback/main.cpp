@@ -9,7 +9,7 @@
  * the pitch stays correct even when the device refuses the rate that was asked for. And nothing is
  * logged from inside the renderer: that runs on the device's real-time thread, where formatting a
  * message is exactly the kind of work that produces the xruns it would be reporting.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/catalyst.hpp>

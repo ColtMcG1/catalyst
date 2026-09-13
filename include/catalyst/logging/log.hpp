@@ -17,7 +17,7 @@
  *
  * Every call goes through `default_logger()`. There is no per-subsystem router; audiences are
  * separated at the sink end with filters.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

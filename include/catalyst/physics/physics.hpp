@@ -2,7 +2,7 @@
  * @file physics.hpp
  * @brief Main header for Catalyst Physics library, including all physics components.
  * @details This header serves as the primary include for the Catalyst Physics library, which provides a collection of physics utilities and types commonly used in game development and real-time applications. By including this single header, users can access all the functionality provided by the Catalyst Physics library without needing to include individual component headers. The library is designed to be efficient, easy to use, and compatible with modern C++ standards.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

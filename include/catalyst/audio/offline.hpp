@@ -18,7 +18,7 @@
  * Capture is likewise explicit. Where the old backend wrote a WAV during `shutdown()` if a path had
  * been set and retention happened to be on - best effort, no way to report failure, in a `noexcept`
  * teardown - @ref offline_stream::write_wav is a call that says what it did.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

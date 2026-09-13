@@ -2,7 +2,7 @@
 # Creates a window and echoes keyboard, text, mouse and gamepad events, and demonstrates the polled input_state tracker
 # and cursor capture, and reports everything through the logging module. Links the monolithic library when available,
 # otherwise the platform, input, core and logging modules.
-# License: CDDL-1.0 (see LICENSE).
+# License: MIT (see LICENSE).
 
 add_executable(catalyst_input_events
   main.cpp

@@ -1,7 +1,7 @@
 /**
  * @file serializer.hpp
  * @brief Serialization of a @ref value tree or a @ref document back to JSON text via the @ref dump overloads.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

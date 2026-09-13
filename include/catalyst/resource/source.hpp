@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file source.hpp
@@ -22,7 +22,7 @@
  * path (see vfs.hpp) will call it from a worker while the main thread calls it too. Both sources
  * here are: the file source holds no mutable state across a call, and the memory source's table is
  * fixed at construction.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

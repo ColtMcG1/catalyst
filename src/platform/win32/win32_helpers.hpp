@@ -8,7 +8,7 @@
  *
  * This header stays free of <windows.h> -- the backends that include it also include much else, and
  * the opaque handle typedefs cost nothing.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

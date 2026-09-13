@@ -1,7 +1,7 @@
 /**
  * @file module.cpp
  * @brief Module and entry-point lookup for the Win32 backends.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "module.hpp"

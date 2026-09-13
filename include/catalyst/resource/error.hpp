@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file error.hpp
@@ -14,7 +14,7 @@
  * something that happened to a named asset. When a loader wraps a parse failure, it keeps the
  * document's own message in @ref error::detail and reports @ref error_code::decode_failed, so the
  * caller branches on one enum and still gets the line number in a log.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

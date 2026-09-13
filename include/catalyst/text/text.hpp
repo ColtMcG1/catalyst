@@ -4,7 +4,7 @@
  * @details Including this header pulls in the whole module: the @ref catalyst::text::utf8 codec and
  * surrogate helpers, and the @ref catalyst::text::scan byte scanners. Individual headers can be
  * included instead when only part of the module is needed.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

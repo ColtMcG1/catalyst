@@ -20,7 +20,7 @@
  *
  * The three basic filters are named types rather than lambdas so that they can be stored, compared
  * against in a debugger, and implemented out of line.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

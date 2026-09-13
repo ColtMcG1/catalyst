@@ -1,7 +1,7 @@
 /**
  * @file calibration.cpp
  * @brief Implementation of the dead-zone calibrator.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/input/calibration.hpp>

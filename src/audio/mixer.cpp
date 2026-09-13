@@ -12,7 +12,7 @@
  * render thread when the voice ends; `held[i]` does the same for a sound. They exist so that
  * reclaiming a slot needs no message: a message can be refused by a full ring, and a refused
  * "this voice ended" is a slot that never comes back.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/audio/mixer.hpp>

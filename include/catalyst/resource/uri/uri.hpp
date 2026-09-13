@@ -20,7 +20,7 @@
  * with no allocation; only the operations that must build new text
  * (@ref catalyst::resource::uri::resolve, @ref catalyst::resource::uri::normalized,
  * @ref catalyst::resource::percent_decode) allocate.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #pragma once

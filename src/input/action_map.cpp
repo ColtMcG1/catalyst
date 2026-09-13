@@ -1,7 +1,7 @@
 /**
  * @file action_map.cpp
  * @brief Implementation of action_map and action_set.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/input/action_map.hpp>

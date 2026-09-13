@@ -1,7 +1,7 @@
 /**
  * @file event_ring.cpp
  * @brief Implements the shared queue declared in detail/event_ring.hpp.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/logging/detail/event_ring.hpp>

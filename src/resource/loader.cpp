@@ -1,5 +1,5 @@
 /**
- * SPDX-License-Identifier: CDDL-1.0
+ * SPDX-License-Identifier: MIT
  * SPDX-FileCopyrightText: 2026-Current Catalyst
  *
  * @file loader.cpp
@@ -8,7 +8,7 @@
  * detail/loader_impl.hpp. These are here so that the `uri` work -- resolving a dependency against
  * its parent, and deciding when a failure gets a name -- exists once rather than once per
  * instantiation.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/loader.hpp>

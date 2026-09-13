@@ -2,7 +2,7 @@
  * @file input_backend_null.cpp
  * @brief The do-nothing backend: reports no devices of any kind, so a build on a platform with no implementation still
  * links and runs. Keyboard and mouse are unaffected - those come from the platform layer through input::event_feed.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include "../detail_backend.hpp"

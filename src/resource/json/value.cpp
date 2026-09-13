@@ -7,7 +7,7 @@
  * hands back a mutable reference from the same source. What is here is everything that does not
  * need that: the numeric widening, the object lookups, and the initializer-list constructor that
  * decides between an array and an object.
- * License: CDDL-1.0 (see LICENSE).
+ * License: MIT (see LICENSE).
  */
 
 #include <catalyst/resource/json/value.hpp>
