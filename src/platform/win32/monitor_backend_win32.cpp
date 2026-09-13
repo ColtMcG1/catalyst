@@ -1,9 +1,7 @@
 #include "../detail_backend.hpp"
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#endif // For EnumDisplayMonitors, GetMonitorInfoW, CreateDCW, GetDeviceCaps, EnumDisplaySettingsW, etc.
+// For EnumDisplayMonitors, GetMonitorInfoW, CreateDCW, GetDeviceCaps, EnumDisplaySettingsW, etc.
+#include <win32/windows_lean.hpp>
 
 #include <algorithm>
 #include <string>

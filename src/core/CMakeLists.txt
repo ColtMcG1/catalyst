@@ -1,6 +1,5 @@
 add_library(catalyst_core STATIC
   core.cpp
-  subscription.cpp
 )
 
 add_library(catalyst::core ALIAS catalyst_core)

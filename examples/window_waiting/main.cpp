@@ -1,22 +1,39 @@
 /*
  * @file main.cpp
  * @brief Example of using the Catalyst platform library to create a window and wait for events.
- * @details This example demonstrates how to initialize the Catalyst platform library, create a window, and enter a main loop that waits for events. The example handles window close requests and resize events, printing relevant information to the console. It uses wait_events with an infinite timeout to block until events are available, followed by pump_events to process them. This serves as a basic template for using the Catalyst platform library in applications that require window management and event handling with an event-driven approach.
+ * @details This example demonstrates how to initialize the Catalyst platform library, create a window, install an event
+ * bus, and enter a main loop that waits for events. The example handles window close requests and resize events, logging
+ * relevant information through the Catalyst logging module. It uses wait_events with an infinite timeout to block until
+ * events are available, followed by pump_events to process them. This serves as a basic template for using the Catalyst
+ * platform library in applications that require window management and event handling with an event-driven approach.
  * License: CDDL-1.0 (see LICENSE).
  */
 
 #include <catalyst/catalyst.hpp>
-#include <catalyst/core/dispatcher.hpp>
-#include <catalyst/core/event_sink.hpp>
+#include <catalyst/events/bus.hpp>
+#include <catalyst/logging/logging.hpp>
 #include <catalyst/platform/window.hpp>
 
-#include <cstdio>
+namespace logging = catalyst::logging;
+
+namespace
+{
+  /** @brief Names this example in the log's category column. */
+  struct example_log
+  {
+    static constexpr const char *name = "window_waiting";
+  };
+} // namespace
 
 int main()
 {
   catalyst::catalyst_version_anchor();
 
   using namespace catalyst::platform;
+
+  // One console sink is all it takes for the calls below to reach the terminal, and colour turns
+  // itself on when the stream turns out to be one.
+  logging::default_logger().add_sink(logging::console_sink{});
 
   window_desc desc;
   desc.title = "Catalyst - window_waiting";
@@ -27,45 +44,53 @@ int main()
   window w = create_window(desc);
   if (!w)
   {
-    std::fprintf(stderr, "Failed to create window\n");
+    logging::critical<example_log>("Failed to create window");
     return 1;
   }
 
-  std::printf("Waiting example: wait_events(INFINITE) then pump_events().\n");
+  logging::info<example_log>("Waiting example: wait_events(INFINITE) then pump_events().");
 
-  catalyst::core::dispatcher dispatcher;
-  catalyst::core::event_sink sink(dispatcher);
-  set_event_sink(&sink);
+  // Window events are dispatched to this bus, synchronously from pump_events(). Keyboard and mouse events do not come
+  // through here: those go to the input::event_feed installed with set_input_feed, which input::context implements.
+  catalyst::events::bus bus;
+  set_event_bus(&bus);
 
+  // The listeners are held in scoped_tokens so they come off the bus before it goes out of scope.
   bool running = true;
-  const auto sub_close = sink.subscribe<window_close_requested_event>([&](const window_close_requested_event &e)
-  {
-    (void)e;
-    std::printf("Close requested\n");
-    running = false;
-  });
+  const catalyst::events::scoped_token sub_close =
+      bus.add_listener<window_close_requested_event>([&](const window_close_requested_event &)
+                                                    {
+                                                      logging::info<example_log>("Close requested");
+                                                      running = false;
+                                                    });
 
-  const auto sub_resize = sink.subscribe<window_resized_event>([&](const window_resized_event &e)
-  {
-    //std::printf("Resized: %d x %d\n", e.width_px, e.height_px);
-  });
+  const catalyst::events::scoped_token sub_resize =
+      bus.add_listener<window_resized_event>([&](const window_resized_event &e)
+                                            {
+                                              // The event carries ui::length measurements, which resolve to pixels
+                                              // against the window's DPI context.
+                                              const auto ctx = resolve_context_for_window(w);
+                                              logging::info<example_log>("Resized: {:.0f} x {:.0f}",
+                                                          catalyst::ui::resolve_or(e.width_px, catalyst::ui::axis::x, ctx),
+                                                          catalyst::ui::resolve_or(e.height_px, catalyst::ui::axis::y, ctx));
+                                            });
 
-  const auto sub_enter = sink.subscribe<window_enter_size_move_event>([&](const window_enter_size_move_event &)
-  {
-    //std::printf("Enter size/move (interactive resize begins)\n");
-  });
+  const catalyst::events::scoped_token sub_enter =
+      bus.add_listener<window_enter_size_move_event>([](const window_enter_size_move_event &)
+                                                    { logging::info<example_log>("Enter size/move (interactive resize begins)"); });
 
-  const auto sub_exit = sink.subscribe<window_exit_size_move_event>([&](const window_exit_size_move_event &)
-  {
-    //std::printf("Exit size/move (interactive resize ends)\n");
-  });
+  const catalyst::events::scoped_token sub_exit =
+      bus.add_listener<window_exit_size_move_event>([](const window_exit_size_move_event &)
+                                                   { logging::info<example_log>("Exit size/move (interactive resize ends)"); });
+
   while (running && is_valid(w))
   {
     (void)wait_events(0xFFFFFFFFu); // INFINITE
     pump_events();
-    std::printf("Frame...\n");
+    logging::trace<example_log>("Frame...");
   }
 
+  set_event_bus(nullptr);
   destroy_window(w);
   return 0;
 }

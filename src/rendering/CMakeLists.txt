@@ -1,5 +1,17 @@
 add_library(catalyst_rendering STATIC
   rendering.cpp
+  error.cpp
+  device.cpp
+  timeline.cpp
+  queue.cpp
+  buffer.cpp
+  shader.cpp
+  texture.cpp
+  pipeline.cpp
+  swapchain.cpp
+  command.cpp
+  frame.cpp
+  transfer.cpp
 )
 
 add_library(catalyst::rendering ALIAS catalyst_rendering)
@@ -10,17 +22,27 @@ target_include_directories(catalyst_rendering
     $<INSTALL_INTERFACE:include>
 )
 
+# Diagnostics go through catalyst::logging rather than to stderr (src/rendering/detail_log.hpp).
+# PRIVATE: no public rendering header includes a logging one.
+target_link_libraries(catalyst_rendering PRIVATE catalyst::logging)
+
 set(CATALYST_RENDERING_BACKEND "auto" CACHE STRING "Rendering backend (auto|d3d12|vulkan|null)")
 set_property(CACHE CATALYST_RENDERING_BACKEND PROPERTY STRINGS auto d3d12 vulkan null)
 
+# `auto` resolves to Vulkan on every platform, which is the backend Catalyst targets for Windows and
+# Linux. It used to resolve to d3d12 on Windows, and that was a trap: the d3d12 and metal backends
+# are identity stubs whose resource layer is the null bookkeeping implementation, so an `auto` build
+# on Windows silently produced a renderer that recorded state and drew nothing. Both stay selectable
+# by name, and stay opt-in until they are real.
 set(_catalyst_rendering_backend "${CATALYST_RENDERING_BACKEND}")
 if(_catalyst_rendering_backend STREQUAL "auto")
-  if(WIN32)
-    set(_catalyst_rendering_backend "d3d12")
-  else()
-    set(_catalyst_rendering_backend "vulkan")
-  endif()
+  set(_catalyst_rendering_backend "vulkan")
 endif()
+
+# CPU-side bookkeeping implementation of the resource contract (src/rendering/detail_backend.hpp).
+# It is the resource layer of the null backend and stands in for backends whose GPU resource layer
+# has not been written yet, so the public API links and is testable on every configuration.
+set(_catalyst_rendering_null_resources ${CMAKE_CURRENT_SOURCE_DIR}/null/null_resources.cpp)
 
 if(_catalyst_rendering_backend STREQUAL "d3d12")
   if(NOT WIN32)
@@ -29,38 +51,60 @@ if(_catalyst_rendering_backend STREQUAL "d3d12")
 
   add_library(catalyst_rendering_backend_d3d12 STATIC
     d3d12/rendering_backend_d3d12.cpp
+    # TODO(d3d12): replace with a real resource implementation.
+    ${_catalyst_rendering_null_resources}
   )
 
   target_include_directories(catalyst_rendering_backend_d3d12
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}
+      ${PROJECT_SOURCE_DIR}/include
   )
+
+  target_link_libraries(catalyst_rendering_backend_d3d12 PRIVATE catalyst::logging)
 
   target_link_libraries(catalyst_rendering PRIVATE catalyst_rendering_backend_d3d12)
 elseif(_catalyst_rendering_backend STREQUAL "vulkan")
+  # Headers and the loader import library come from the Vulkan SDK (VULKAN_SDK env var) or the system package.
+  find_package(Vulkan REQUIRED)
+
   add_library(catalyst_rendering_backend_vulkan STATIC
     vulkan/rendering_backend_vulkan.cpp
-    vulkan/vulkan_devices.cpp
+    vulkan/vulkan_device.cpp
     vulkan/vulkan_memory.cpp
-    vulkan/vulkan_buffers.cpp
+    vulkan/vulkan_buffer.cpp
+    vulkan/vulkan_shader.cpp
+    vulkan/vulkan_texture.cpp
+    vulkan/vulkan_pipeline.cpp
     vulkan/vulkan_swapchain.cpp
+    vulkan/vulkan_command.cpp
+    vulkan/vulkan_transfer.cpp
   )
 
   target_include_directories(catalyst_rendering_backend_vulkan
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}
+      ${PROJECT_SOURCE_DIR}/include
   )
+
+  target_link_libraries(catalyst_rendering_backend_vulkan PRIVATE catalyst::logging)
+
+  target_link_libraries(catalyst_rendering_backend_vulkan PUBLIC Vulkan::Vulkan)
 
   target_link_libraries(catalyst_rendering PRIVATE catalyst_rendering_backend_vulkan)
 elseif(_catalyst_rendering_backend STREQUAL "null")
   add_library(catalyst_rendering_backend_null STATIC
     null/rendering_backend_null.cpp
+    ${_catalyst_rendering_null_resources}
   )
 
   target_include_directories(catalyst_rendering_backend_null
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}
+      ${PROJECT_SOURCE_DIR}/include
   )
+
+  target_link_libraries(catalyst_rendering_backend_null PRIVATE catalyst::logging)
 
   target_link_libraries(catalyst_rendering PRIVATE catalyst_rendering_backend_null)
 else()

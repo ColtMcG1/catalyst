@@ -7,6 +7,21 @@
 
 #pragma once
 
+// The asset system: naming, sourcing, ownership.
+#include <catalyst/resource/blob.hpp>
+#include <catalyst/resource/error.hpp>
+#include <catalyst/resource/handle.hpp>
+#include <catalyst/resource/image.hpp>
+#include <catalyst/resource/loader.hpp>
+#include <catalyst/resource/registry.hpp>
+#include <catalyst/resource/source.hpp>
+#include <catalyst/resource/vfs.hpp>
+
+// The document formats assets are written in.
+#include <catalyst/resource/csv/csv.hpp>
+#include <catalyst/resource/json/json.hpp>
+#include <catalyst/resource/uri/uri.hpp>
+
 /**
  * @namespace catalyst::resource
  * @brief The catalyst::resource namespace contains all the resource management types and functions provided by the Catalyst Resource library. This includes various utilities for managing resources such as textures, models, shaders, and other assets commonly used in game development and real-time applications. By organizing all resource-related functionality within this namespace, we can avoid naming conflicts and provide a clear structure for users of the library to access the various tools they need for managing resources in their projects. The Catalyst Resource library is designed to be efficient, easy to use, and compatible with modern C++ standards, making it a valuable resource for developers building complex systems that require effective resource management.

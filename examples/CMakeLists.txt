@@ -5,3 +5,7 @@
 add_subdirectory(sandbox)
 add_subdirectory(window_polling)
 add_subdirectory(window_waiting)
+add_subdirectory(input_events)
+add_subdirectory(input_actions)
+add_subdirectory(rendering_basics)
+add_subdirectory(audio_playback)

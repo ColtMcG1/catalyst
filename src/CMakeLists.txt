@@ -1,5 +1,11 @@
 # Module targets live in subdirectories
 
+# Win32 plumbing shared by the platform, input and audio backends. Not a module: no build switch,
+# and it is added before them so every backend can link it.
+if(WIN32)
+  add_subdirectory(win32)
+endif()
+
 if(CATALYST_BUILD_ANIMATION)
   add_subdirectory(animation)
 endif()
@@ -14,6 +20,10 @@ endif()
 
 if(CATALYST_BUILD_INPUT)
   add_subdirectory(input)
+endif()
+
+if(CATALYST_BUILD_LOGGING)
+  add_subdirectory(logging)
 endif()
 
 if(CATALYST_BUILD_MATH)
@@ -98,6 +108,10 @@ if(CATALYST_BUILD_ALL)
 
   if(TARGET catalyst_input)
     target_link_libraries(catalyst PUBLIC catalyst_input)
+  endif()
+
+  if(TARGET catalyst_logging)
+    target_link_libraries(catalyst PUBLIC catalyst_logging)
   endif()
 
   if(TARGET catalyst_math)

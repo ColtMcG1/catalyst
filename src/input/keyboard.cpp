@@ -3,46 +3,167 @@
 namespace catalyst::input
 {
 
-    text_input_event::text_input_event() noexcept : text(buffer.data(), 0) {}
-
-    text_input_event::text_input_event(std::span<const char32_t> input) noexcept : text(buffer.data(), 0)
+    std::string_view key_name(key_code code) noexcept
     {
-        assign(input);
+        switch (code)
+        {
+        case key_code::unknown: return "Unknown";
+        case key_code::a: return "A";
+        case key_code::b: return "B";
+        case key_code::c: return "C";
+        case key_code::d: return "D";
+        case key_code::e: return "E";
+        case key_code::f: return "F";
+        case key_code::g: return "G";
+        case key_code::h: return "H";
+        case key_code::i: return "I";
+        case key_code::j: return "J";
+        case key_code::k: return "K";
+        case key_code::l: return "L";
+        case key_code::m: return "M";
+        case key_code::n: return "N";
+        case key_code::o: return "O";
+        case key_code::p: return "P";
+        case key_code::q: return "Q";
+        case key_code::r: return "R";
+        case key_code::s: return "S";
+        case key_code::t: return "T";
+        case key_code::u: return "U";
+        case key_code::v: return "V";
+        case key_code::w: return "W";
+        case key_code::x: return "X";
+        case key_code::y: return "Y";
+        case key_code::z: return "Z";
+        case key_code::digit_1: return "1";
+        case key_code::digit_2: return "2";
+        case key_code::digit_3: return "3";
+        case key_code::digit_4: return "4";
+        case key_code::digit_5: return "5";
+        case key_code::digit_6: return "6";
+        case key_code::digit_7: return "7";
+        case key_code::digit_8: return "8";
+        case key_code::digit_9: return "9";
+        case key_code::digit_0: return "0";
+        case key_code::enter: return "Enter";
+        case key_code::escape: return "Escape";
+        case key_code::backspace: return "Backspace";
+        case key_code::tab: return "Tab";
+        case key_code::space: return "Space";
+        case key_code::minus: return "-";
+        case key_code::equal: return "=";
+        case key_code::left_bracket: return "[";
+        case key_code::right_bracket: return "]";
+        case key_code::backslash: return "\\";
+        case key_code::non_us_hash: return "Non-US #";
+        case key_code::semicolon: return ";";
+        case key_code::apostrophe: return "'";
+        case key_code::grave_accent: return "`";
+        case key_code::comma: return ",";
+        case key_code::period: return ".";
+        case key_code::slash: return "/";
+        case key_code::caps_lock: return "Caps Lock";
+        case key_code::f1: return "F1";
+        case key_code::f2: return "F2";
+        case key_code::f3: return "F3";
+        case key_code::f4: return "F4";
+        case key_code::f5: return "F5";
+        case key_code::f6: return "F6";
+        case key_code::f7: return "F7";
+        case key_code::f8: return "F8";
+        case key_code::f9: return "F9";
+        case key_code::f10: return "F10";
+        case key_code::f11: return "F11";
+        case key_code::f12: return "F12";
+        case key_code::print_screen: return "Print Screen";
+        case key_code::scroll_lock: return "Scroll Lock";
+        case key_code::pause: return "Pause";
+        case key_code::insert: return "Insert";
+        case key_code::home: return "Home";
+        case key_code::page_up: return "Page Up";
+        case key_code::delete_key: return "Delete";
+        case key_code::end: return "End";
+        case key_code::page_down: return "Page Down";
+        case key_code::right_arrow: return "Right";
+        case key_code::left_arrow: return "Left";
+        case key_code::down_arrow: return "Down";
+        case key_code::up_arrow: return "Up";
+        case key_code::num_lock: return "Num Lock";
+        case key_code::keypad_divide: return "Keypad /";
+        case key_code::keypad_multiply: return "Keypad *";
+        case key_code::keypad_minus: return "Keypad -";
+        case key_code::keypad_plus: return "Keypad +";
+        case key_code::keypad_enter: return "Keypad Enter";
+        case key_code::keypad_1: return "Keypad 1";
+        case key_code::keypad_2: return "Keypad 2";
+        case key_code::keypad_3: return "Keypad 3";
+        case key_code::keypad_4: return "Keypad 4";
+        case key_code::keypad_5: return "Keypad 5";
+        case key_code::keypad_6: return "Keypad 6";
+        case key_code::keypad_7: return "Keypad 7";
+        case key_code::keypad_8: return "Keypad 8";
+        case key_code::keypad_9: return "Keypad 9";
+        case key_code::keypad_0: return "Keypad 0";
+        case key_code::keypad_period: return "Keypad .";
+        case key_code::non_us_backslash: return "Non-US \\";
+        case key_code::application: return "Application";
+        case key_code::power: return "Power";
+        case key_code::keypad_equal: return "Keypad =";
+        case key_code::f13: return "F13";
+        case key_code::f14: return "F14";
+        case key_code::f15: return "F15";
+        case key_code::f16: return "F16";
+        case key_code::f17: return "F17";
+        case key_code::f18: return "F18";
+        case key_code::f19: return "F19";
+        case key_code::f20: return "F20";
+        case key_code::f21: return "F21";
+        case key_code::f22: return "F22";
+        case key_code::f23: return "F23";
+        case key_code::f24: return "F24";
+        case key_code::execute: return "Execute";
+        case key_code::help: return "Help";
+        case key_code::menu: return "Menu";
+        case key_code::select: return "Select";
+        case key_code::stop: return "Stop";
+        case key_code::again: return "Again";
+        case key_code::undo: return "Undo";
+        case key_code::cut: return "Cut";
+        case key_code::copy: return "Copy";
+        case key_code::paste: return "Paste";
+        case key_code::find: return "Find";
+        case key_code::mute: return "Mute";
+        case key_code::volume_up: return "Volume Up";
+        case key_code::volume_down: return "Volume Down";
+        case key_code::keypad_comma: return "Keypad ,";
+        case key_code::keypad_equal_as400: return "Keypad = (AS/400)";
+        case key_code::international1: return "International 1";
+        case key_code::international2: return "International 2";
+        case key_code::international3: return "International 3";
+        case key_code::international4: return "International 4";
+        case key_code::international5: return "International 5";
+        case key_code::international6: return "International 6";
+        case key_code::international7: return "International 7";
+        case key_code::international8: return "International 8";
+        case key_code::international9: return "International 9";
+        case key_code::lang1: return "Lang 1";
+        case key_code::lang2: return "Lang 2";
+        case key_code::lang3: return "Lang 3";
+        case key_code::lang4: return "Lang 4";
+        case key_code::lang5: return "Lang 5";
+        case key_code::lang6: return "Lang 6";
+        case key_code::lang7: return "Lang 7";
+        case key_code::lang8: return "Lang 8";
+        case key_code::lang9: return "Lang 9";
+        case key_code::left_control: return "Left Control";
+        case key_code::left_shift: return "Left Shift";
+        case key_code::left_alt: return "Left Alt";
+        case key_code::left_super: return "Left Super";
+        case key_code::right_control: return "Right Control";
+        case key_code::right_shift: return "Right Shift";
+        case key_code::right_alt: return "Right Alt";
+        case key_code::right_super: return "Right Super";
+        }
+        return "Unknown";
     }
 
-    text_input_event::text_input_event(const text_input_event &other) noexcept
-        : buffer(other.buffer), length(other.length), text(buffer.data(), other.length)
-    {
-    }
-
-    text_input_event &text_input_event::operator=(const text_input_event &other) noexcept
-    {
-        if (this == &other)
-            return *this;
-        buffer = other.buffer;
-        length = other.length;
-        text = {buffer.data(), other.length};
-        return *this;
-    }
-
-    text_input_event::text_input_event(text_input_event &&other) noexcept
-        : buffer(other.buffer), length(other.length), text(buffer.data(), other.length)
-    {
-    }
-
-    text_input_event &text_input_event::operator=(text_input_event &&other) noexcept
-    {
-        buffer = other.buffer;
-        length = other.length;
-        text = {buffer.data(), other.length};
-        return *this;
-    }
-
-    void text_input_event::assign(std::span<const char32_t> input) noexcept
-    {
-        const std::size_t n = std::min<std::size_t>(input.size(), buffer.size());
-        length = static_cast<std::uint8_t>(n);
-        std::copy_n(input.begin(), n, buffer.begin());
-        text = {buffer.data(), n};
-    }
-}
+} // namespace catalyst::input

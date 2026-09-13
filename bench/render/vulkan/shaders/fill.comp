@@ -1,0 +1,18 @@
+// Compute stage used only to build a compute pipeline in the pipeline benchmark, as a cheap counterpart to the
+// graphics pipelines. Binding model: storage buffers live in set 1 (see catalyst/rendering/command.hpp).
+// License: CDDL-1.0 (see LICENSE).
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(set = 1, binding = 0) buffer Output
+{
+    uint data[];
+} output_buffer;
+
+void main()
+{
+    const uint i = gl_GlobalInvocationID.x;
+    if (i < output_buffer.data.length())
+        output_buffer.data[i] = i;
+}

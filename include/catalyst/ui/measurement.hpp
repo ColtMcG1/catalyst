@@ -2,7 +2,7 @@
  * @file measurement.hpp
  * @brief Defines types and functions for representing and resolving CSS-like measurements.
  * @details This includes the `calc_measure` template for representing linear combinations of units, and the `length` type for common CSS length units. The `resolve_or` function converts these measurements to pixels using a provided context.
- * License: MIT (see LICENSE).
+ * License: CDDL-1.0 (see LICENSE).
  */
 
 #pragma once

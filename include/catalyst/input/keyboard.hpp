@@ -11,11 +11,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <span>
+#include <string_view>
 #include <type_traits>
 
-#include "catalyst/core/event.hpp"
-#include "catalyst/input/usb.hpp"
+#include <catalyst/input/device.hpp>
 
 /**
  * @namespace catalyst::input
@@ -24,13 +23,6 @@
  */
 namespace catalyst::input
 {
-
-    /**
-     * @typedef character_code
-     * @brief A type alias for char32_t, representing a Unicode code point for character input. This type is used for handling text input events separately from physical key presses, allowing for proper representation of characters that may be produced by various key combinations, keyboard layouts, and modifier keys. By using char32_t, we can support a wide range of Unicode characters, including those outside the Basic Multilingual Plane (BMP), ensuring that text input can be accurately represented regardless of the language or character set being used.
-     * @details The character_code type alias is defined as char32_t, which is a fixed-width character type capable of representing any Unicode code point. This allows for proper handling of text input events that may produce characters from various languages and scripts, including those that require multiple bytes to represent. By using character_code for text input events, we can ensure that the resulting text can be accurately represented and processed, regardless of the specific keys pressed or the keyboard layout in use. This separation of physical key codes and character codes allows for greater flexibility in handling user input and ensures that text input can be properly managed in a wide range of applications.
-     */
-    using character_code = char32_t;
 
     /**
      * @enum key_code
@@ -185,8 +177,42 @@ namespace catalyst::input
         lang6 = 149,
         lang7 = 150,
         lang8 = 151,
-        lang9 = 152
+        lang9 = 152,
+        left_control = 224,
+        left_shift = 225,
+        left_alt = 226,
+        left_super = 227,
+        right_control = 228,
+        right_shift = 229,
+        right_alt = 230,
+        right_super = 231
     };
+
+    /**
+     * @var key_code_count
+     * @brief One past the largest key_code value. Useful for sizing lookup tables indexed by key_code.
+     */
+    inline constexpr std::size_t key_code_count = 256;
+
+    /**
+     * @fn key_name
+     * @brief Returns a short, stable, human-readable name for a physical key (e.g. "A", "Left Shift", "Keypad Enter"). The
+     * names describe the key's position on a US layout, not the character it produces under the active layout; they are
+     * intended for key-binding UIs, logs and configuration files. Returns "Unknown" for key_code::unknown and for values
+     * that are not part of the enumeration.
+     * @param code The key to name.
+     * @return A null-terminated string view with static storage duration.
+     */
+    [[nodiscard]] std::string_view key_name(key_code code) noexcept;
+
+    /**
+     * @fn is_modifier_key
+     * @brief True for the eight modifier keys (left/right control, shift, alt and super).
+     */
+    [[nodiscard]] inline constexpr bool is_modifier_key(key_code code) noexcept
+    {
+        return code >= key_code::left_control && code <= key_code::right_super;
+    }
 
     /**
      * @fn to_usb_hid
@@ -232,18 +258,6 @@ namespace catalyst::input
 
         return static_cast<key_code>(id);
     }
-
-    /**
-     * @enum key_action
-     * @brief An enumeration representing the type of action performed on a key, such as pressing, releasing, or repeating a key. This enumeration is used in key events to indicate the specific action that occurred with a key press, allowing for proper handling of different types of key interactions in applications. By distinguishing between key actions, developers can implement features such as key repeat behavior, handling of key releases, and differentiation between initial key presses and repeated key events.
-     * @details The key_action enumeration includes values for press, release, and repeat actions. The press action indicates that a key has been pressed down, the release action indicates that a key has been released, and the repeat action indicates that a key is being held down and is generating repeated events. By using this enumeration in key events, developers can implement features such as key repeat behavior, handling of key releases, and differentiation between initial key presses and repeated key events, allowing for more responsive and intuitive input handling in applications.
-     */
-    enum class key_action : std::uint8_t
-    {
-        press,
-        release,
-        repeat
-    };
 
     /**
      * @enum key_modifiers
@@ -363,113 +377,74 @@ namespace catalyst::input
     {
         return (value & flag) != key_modifiers::none;
     }
+
+    // ------------------------------------------------------------------------------------------------------------------
+    // Controls
+    // ------------------------------------------------------------------------------------------------------------------
+
+    /**
+     * @fn control_of
+     * @brief The control slot a key occupies on a keyboard device. Slot index == USB HID usage id, so the layout is the
+     * HID keyboard page laid out flat and `from_usb_hid(make_usb_hid(page_keyboard, slot))` recovers the key.
+     * @param code The key.
+     * @return Its slot, or no_control for key_code::unknown.
+     */
+    [[nodiscard]] inline constexpr control_id control_of(key_code code) noexcept
+    {
+        return code == key_code::unknown ? no_control : control_at(static_cast<std::size_t>(code));
+    }
+
+    /**
+     * @fn key_of
+     * @brief The inverse of control_of(): the key a keyboard slot belongs to, or key_code::unknown.
+     */
+    [[nodiscard]] inline constexpr key_code key_of(control_id control) noexcept
+    {
+        if (!control.valid() || control.index >= key_code_count || control.index == 0)
+            return key_code::unknown;
+        return static_cast<key_code>(control.index);
+    }
+
+    /**
+     * @fn keyboard_layout
+     * @brief The layout every keyboard device shares: key_code_count button controls, named by key_name().
+     * @details Returned by reference to a function-local static, so it is built once, on first use, and every keyboard
+     * device points at the same object.
+     */
+    [[nodiscard]] const layout_ref &keyboard_layout();
+
+    // ------------------------------------------------------------------------------------------------------------------
+    // Events
+    // ------------------------------------------------------------------------------------------------------------------
+
     /**
      * @struct key_event
-     * @brief A structure representing a key event, which includes information about the key code, the native USB HID usage ID, the action performed on the key (press, release, repeat), and any active modifiers at the time of the event. This structure is used in key events to provide detailed information about the specific key interaction that occurred, allowing for proper handling of different types of key interactions in applications. By including both the key code and the native USB HID usage ID, developers can maintain compatibility with the underlying USB HID standard while also providing a more abstract representation of keyboard input through the key_code enumeration.
-     * @details The key_event structure inherits from core::event<key_event>, allowing it to be used as an event type within the Catalyst event system. It contains a key_code value that represents the physical key involved in the event, a usb_hid value that represents the native USB HID usage ID for the key, a key_action value that indicates whether the key was pressed, released, or repeated, and a key_modifiers value that indicates which modifier keys were active at the time of the event. This structure provides comprehensive information about a key interaction, enabling developers to implement responsive and intuitive input handling in their applications.
+     * @brief One physical key press, auto-repeat or release. Key events describe *physical* keys (see key_code); for the
+     * characters the user actually typed, listen for text_input_event instead (see text.hpp).
+     * @details When a window loses focus the registry synthesises a release for every key it still holds, so no consumer
+     * is left with a key stuck down. The platform layer only reports the focus loss; see input::event_feed.
      */
-    struct key_event : public core::event<key_event>
+    struct key_event : device_event<tags::key>
     {
-        key_code code{};
-        usb_hid native_code{usb_hid_unknown};
-        key_action action{key_action::press};
+        /** @brief The platform::window_id of the window that had keyboard focus, or 0 if there was none. */
+        std::uint64_t window{0};
+        /** @brief The physical key, or key_code::unknown if the platform could not map it. */
+        key_code code{key_code::unknown};
+        /**
+         * @brief The platform's raw scan code (Win32: the 8-bit scan code, with 0xE000 added for extended keys), or 0
+         * when the platform supplied none. Meaningful only to the platform that produced it; useful for asking the OS
+         * for a localised key name.
+         */
+        std::uint32_t scancode{0};
+        /** @brief Whether the key went down, auto-repeated, or came up. */
+        button_action action{button_action::press};
+        /** @brief The modifiers and lock states active when the event was generated. */
         key_modifiers modifiers{key_modifiers::none};
-    };
-    /**
-     * @struct character_event
-     * @brief A structure representing a character event, which includes information about the character code and any active modifiers at the time of the event. This structure is used in character events to provide detailed information about the specific character input that occurred, allowing for proper handling of text input in applications. By using a separate structure for character events, we can maintain a clear distinction between physical key presses (represented by key_event) and the resulting text input (represented by character_event), which can be affected by factors such as keyboard layout and modifier keys.
-     * @details The character_event structure inherits from core::event<character_event>, allowing it to be used as an event type within the Catalyst event system. It contains a character_code value that represents the Unicode code point for the character input, and a key_modifiers value that indicates which modifier keys were active at the time of the event. This structure provides comprehensive information about a character input interaction, enabling developers to implement responsive and intuitive text input handling in their applications while maintaining a clear separation from physical key events.
-     */
-    struct character_event : public core::event<character_event>
-    {
-        character_code character{};
-        key_modifiers modifiers{key_modifiers::none};
-    };
-    /**
-     * @struct text_input_event
-     * @brief A structure representing a text input event, which includes a buffer for storing a sequence of character codes, the length of valid characters in the buffer, and a view of the valid text code points. This structure is used in text input events to provide detailed information about the specific text input that occurred, allowing for proper handling of text input in applications. By using a separate structure for text input events, we can maintain a clear distinction between physical key presses (represented by key_event) and the resulting text input (represented by text_input_event), which can be affected by factors such as keyboard layout and modifier keys.
-     * @details The text_input_event structure inherits from core::event<text_input_event>, allowing it to be used as an event type within the Catalyst event system. It contains a fixed-size array buffer for storing character codes, a length field that indicates how many characters in the buffer are valid, and a std::span view that provides access to the valid text code points in the buffer. This structure provides comprehensive information about a text input interaction, enabling developers to implement responsive and intuitive text input handling in their applications while maintaining a clear separation from physical key events.
-     */
-    struct text_input_event : public core::event<text_input_event>
-    {
-        /**
-         * @var inline_capacity
-         * @brief The inline capacity of the text input buffer. This constant defines the size of the fixed buffer used to store character codes for text input events. By using a fixed-size buffer with an inline capacity, we can optimize for common cases where the text input is short, while still allowing for longer input by using the length field to indicate how many characters in the buffer are valid. This design allows for efficient handling of text input events without the need for dynamic memory allocation in most cases.
-         */
-        static constexpr std::size_t inline_capacity = 8;
 
-        /**
-         * @var buffer
-         * @brief A fixed-size array buffer for storing character codes in a text input event.
-         */
-        std::array<char32_t, inline_capacity> buffer{};
-        /**
-         * @var length
-         * @brief The length of valid characters in the text input buffer. This field indicates how many characters in the buffer are valid and should be considered part of the text input. By using a length field, we can allow for variable-length text input while still using a fixed-size buffer, optimizing for common cases where the text input is short.
-         */
-        std::uint8_t length = 0;
-        /**
-         * @var text
-         * @brief A view of the valid text code points in the buffer. This std::span provides access to the valid characters in the buffer based on the length field, allowing for easy retrieval of the text input without needing to manually manage the buffer and length separately.
-         */
-        std::span<const char32_t> text{};
-
-        /**
-         * @fn text_input_event
-         * @brief Default constructor for text_input_event. This constructor initializes the text input event with an empty buffer and a length of zero, resulting in an empty text view. This allows for the creation of a text_input_event instance that can be assigned text input later using the assign function or through other means.
-         * @details The default constructor initializes the buffer to an empty state, sets the length to zero, and initializes the text view to point to the buffer with a size of zero. This ensures that the text_input_event starts in a valid state, ready to receive text input when assigned or when constructed with specific input.
-         */
-        text_input_event() noexcept;
-        /**
-         * @fn text_input_event
-         * @brief Constructor for text_input_event that takes a span of character codes as input. This constructor initializes the text input event with the provided character codes, copying them into the internal buffer and setting the length accordingly. The text view is then updated to point to the valid characters in the buffer based on the length. This allows for the creation of a text_input_event instance that is immediately populated with specific text input.
-         * @param input A span of character codes to initialize the text input event with.
-         * @details The constructor takes a span of character codes as input, determines how many characters can be copied into the fixed-size buffer (up to inline_capacity), copies the characters into the buffer, sets the length field to indicate how many characters were copied, and initializes the text view to point to the valid characters in the buffer. This allows for efficient initialization of a text_input_event with specific text input while maintaining safety by not exceeding the buffer capacity.
-         */
-        explicit text_input_event(std::span<const char32_t> input) noexcept;
-        /**
-         * @fn text_input_event
-         * @brief Copy constructor for text_input_event. This constructor creates a new text_input_event instance by copying the buffer and length from another instance, and then updating the text view to point to the valid characters in the new buffer. This allows for proper copying of text_input_event instances while ensuring that the internal state is correctly maintained.
-         * @param other The text_input_event instance to copy from.
-         */
-        text_input_event(const text_input_event &other) noexcept;
-        /**
-         * @fn operator=
-         * @brief Copy assignment operator for text_input_event. This operator assigns the buffer and length from another text_input_event instance to the current instance, and then updates the text view to point to the valid characters in the new buffer. This allows for proper assignment of text_input_event instances while ensuring that the internal state is correctly maintained.
-         * @param other The text_input_event instance to assign from.
-         * @return A reference to the assigned text_input_event instance.
-         */
-        text_input_event &operator=(const text_input_event &other) noexcept;
-        /**
-         * @fn text_input_event
-         * @brief Move constructor for text_input_event. This constructor creates a new text_input_event instance by moving the buffer and length from another instance, and then updating the text view to point to the valid characters in the new buffer. This allows for efficient transfer of ownership of the internal state from one text_input_event instance to another without unnecessary copying.
-         * @param other The text_input_event instance to move from.
-         */
-        text_input_event(text_input_event &&other) noexcept;
-        /**
-         * @fn operator=
-         * @brief Move assignment operator for text_input_event. This operator assigns the buffer and length from another text_input_event instance to the current instance by moving them, and then updates the text view to point to the valid characters in the new buffer. This allows for efficient transfer of ownership of the internal state from one text_input_event instance to another without unnecessary copying.
-         * @param other The text_input_event instance to move from.
-         * @return A reference to the assigned text_input_event instance.
-         */
-        text_input_event &operator=(text_input_event &&other) noexcept;
-        /**
-         * @fn assign
-         * @brief Assigns a span of character codes to the text_input_event. This function copies the provided character codes into the internal buffer, updates the length accordingly, and sets the text view to point to the valid characters in the buffer. This allows for updating the text input of an existing text_input_event instance with new character data.
-         * @param input A span of character codes to assign to the text input event.
-         */
-        void assign(std::span<const char32_t> input) noexcept;
-    };
-
-    /**
-     * @struct edit_key_event
-     * @brief A structure representing an edit key event, which includes information about the key code and any active modifiers at the time of the event. This structure is used in edit key events to provide detailed information about specific key interactions that are relevant to text editing operations, such as cursor movement, deletion, and selection. By using a separate structure for edit key events, we can maintain a clear distinction between general key events (represented by key_event) and those that are specifically related to text editing operations, allowing for more focused handling of edit-related input in applications.
-     * @details The edit_key_event structure inherits from core::event<edit_key_event>, allowing it to be used as an event type within the Catalyst event system. It contains a key_code value that represents the physical key involved in the edit operation, and a key_modifiers value that indicates which modifier keys were active at the time of the event. This structure provides comprehensive information about an edit-related key interaction, enabling developers to implement responsive and intuitive handling of text editing input in their applications while maintaining a clear separation from general key events.
-     */
-    struct edit_key_event : public core::event<edit_key_event>
-    {
-        key_code code{};
-        key_modifiers modifiers{key_modifiers::none};
+        /** @brief The slot this event changed. */
+        [[nodiscard]] constexpr control_id control() const noexcept { return control_of(code); }
+        /** @brief True for a press or a repeat. */
+        [[nodiscard]] constexpr bool down() const noexcept { return is_down_action(action); }
     };
 
 } // namespace catalyst::input
